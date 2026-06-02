@@ -45,6 +45,7 @@ go_library(
         "//tables/fileline",
         "//tables/filevaultusers",
         "//tables/localnetworkpermissions",
+        "//tables/macenclosurecolor",
         "//tables/macos_profiles",
         "//tables/macosrsr",
         "//tables/mdm",
@@ -65,16 +66,25 @@ go_library(
 go_binary(
     name = "osquery-extension-mac-arm",
     embed = [":osquery-extension_lib"],
+    # cgo is enabled on the macOS targets so the mac_enclosure_color table can
+    # call libMobileGestalt.dylib (CoreFoundation) via cgo. The cgo source is
+    # build-tagged darwin-only, so the linux/windows targets below stay pure
+    # (CGO_ENABLED=0). pure = "off" forces CGO_ENABLED=1, using the Apple CC
+    # toolchain registered by apple_support (see WORKSPACE).
+    cgo = True,
     goarch = "arm64",
     goos = "darwin",
+    pure = "off",
     visibility = ["//visibility:public"],
 )
 
 go_binary(
     name = "osquery-extension-mac-amd",
     embed = [":osquery-extension_lib"],
+    cgo = True,
     goarch = "amd64",
     goos = "darwin",
+    pure = "off",
     visibility = ["//visibility:public"],
 )
 

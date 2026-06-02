@@ -14,6 +14,7 @@ import (
 	"github.com/macadmins/osquery-extension/tables/fileline"
 	"github.com/macadmins/osquery-extension/tables/filevaultusers"
 	"github.com/macadmins/osquery-extension/tables/localnetworkpermissions"
+	"github.com/macadmins/osquery-extension/tables/macenclosurecolor"
 	macosprofiles "github.com/macadmins/osquery-extension/tables/macos_profiles"
 	"github.com/macadmins/osquery-extension/tables/macosrsr"
 	"github.com/macadmins/osquery-extension/tables/mdm"
@@ -98,6 +99,7 @@ func main() {
 			table.NewPlugin("energy_impact", energyimpact.EnergyImpactColumns(), energyimpact.EnergyImpactGenerate),
 			table.NewPlugin("filevault_users", filevaultusers.FileVaultUsersColumns(), filevaultusers.FileVaultUsersGenerate),
 			table.NewPlugin("local_network_permissions", localnetworkpermissions.LocalNetworkPermissionsColumns(), localnetworkpermissions.LocalNetworkPermissionsGenerate),
+			table.NewPlugin("mac_enclosure_color", macenclosurecolor.MacEnclosureColorColumns(), macenclosurecolor.MacEnclosureColorGenerate),
 			table.NewPlugin("macos_profiles", macosprofiles.MacOSProfilesColumns(), macosprofiles.MacOSProfilesGenerate),
 			table.NewPlugin("mdm", mdm.MDMInfoColumns(), mdm.MDMInfoGenerate),
 			table.NewPlugin("munki_info", munki.MunkiInfoColumns(), munki.MunkiInfoGenerate),

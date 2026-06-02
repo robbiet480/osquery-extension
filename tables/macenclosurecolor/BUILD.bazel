@@ -1,0 +1,50 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "macenclosurecolor",
+    srcs = [
+        "gestalt_darwin.go",
+        "gestalt_other.go",
+        "macenclosurecolor.go",
+        "modelname.go",
+        "resolver.go",
+    ],
+    cgo = True,
+    clinkopts = select({
+        "@io_bazel_rules_go//go/platform:darwin": [
+            "-framework CoreFoundation",
+        ],
+        "@io_bazel_rules_go//go/platform:ios": [
+            "-framework CoreFoundation",
+        ],
+        "//conditions:default": [],
+    }),
+    importpath = "github.com/macadmins/osquery-extension/tables/macenclosurecolor",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pkg/utils",
+        "@com_github_osquery_osquery_go//plugin/table",
+    ],
+)
+
+go_test(
+    name = "macenclosurecolor_test",
+    srcs = [
+        "gestalt_darwin_test.go",
+        "macenclosurecolor_test.go",
+    ],
+    embed = [":macenclosurecolor"],
+    deps = [
+        "//pkg/utils",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ] + select({
+        "@io_bazel_rules_go//go/platform:darwin": [
+            "@com_github_osquery_osquery_go//plugin/table",
+        ],
+        "@io_bazel_rules_go//go/platform:ios": [
+            "@com_github_osquery_osquery_go//plugin/table",
+        ],
+        "//conditions:default": [],
+    }),
+)
