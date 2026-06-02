@@ -444,21 +444,31 @@ func TouchIDUserConfigGenerate(ctx context.Context, queryContext table.QueryCont
 		return nil, err
 	}
 
+	return userConfigsToRows(configs), nil
+}
+
+// userConfigsToRows shapes UserConfig values into osquery row maps. Each column
+// is set only when its value is known; an unknown IntegerColumn must be omitted
+// (NULL) rather than set to "" (an invalid integer). Flags are checked
+// independently — any one can be individually absent (e.g. a macOS version that
+// omits the ApplePay line), so one flag's presence must not be used as a proxy
+// for the others. Extracted from the generate function so this NULL-omission
+// behavior is unit-testable.
+func userConfigsToRows(configs []*UserConfig) []map[string]string {
 	var results []map[string]string
 	for _, c := range configs {
 		row := map[string]string{"uid": c.UID}
-		// Only set keys we actually know; an unknown IntegerColumn must be
-		// omitted (NULL) rather than set to an empty/zero value.
-		if c.FingerprintsRegistered != "" {
-			row["fingerprints_registered"] = c.FingerprintsRegistered
+		setIfKnown := func(key, val string) {
+			if val != "" {
+				row[key] = val
+			}
 		}
-		if c.Unlock != "" {
-			row["touchid_unlock"] = c.Unlock
-			row["touchid_applepay"] = c.ApplePay
-			row["effective_unlock"] = c.EffectiveUnlock
-			row["effective_applepay"] = c.EffectiveApplePay
-		}
+		setIfKnown("fingerprints_registered", c.FingerprintsRegistered)
+		setIfKnown("touchid_unlock", c.Unlock)
+		setIfKnown("touchid_applepay", c.ApplePay)
+		setIfKnown("effective_unlock", c.EffectiveUnlock)
+		setIfKnown("effective_applepay", c.EffectiveApplePay)
 		results = append(results, row)
 	}
-	return results, nil
+	return results
 }

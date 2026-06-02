@@ -279,6 +279,55 @@ func TestGetUserConfigs_SkipsNonexistentUID(t *testing.T) {
 	assert.Empty(t, configs)
 }
 
+func TestUserConfigsToRows_OmitsUnknownColumns(t *testing.T) {
+	t.Parallel()
+	// A config where some flags are known and others are unknown (""). The
+	// unknown ones must be OMITTED from the row map (NULL), never set to "".
+	// Crucially, touchid_unlock being present must NOT pull the other flags in.
+	configs := []*UserConfig{{
+		UID:                    "501",
+		FingerprintsRegistered: "1",
+		Unlock:                 "1",
+		ApplePay:               "", // unknown
+		EffectiveUnlock:        "", // unknown
+		EffectiveApplePay:      "", // unknown
+	}}
+
+	rows := userConfigsToRows(configs)
+	require.Len(t, rows, 1)
+	row := rows[0]
+
+	assert.Equal(t, "501", row["uid"])
+	assert.Equal(t, "1", row["fingerprints_registered"])
+	assert.Equal(t, "1", row["touchid_unlock"])
+	for _, k := range []string{"touchid_applepay", "effective_unlock", "effective_applepay"} {
+		_, present := row[k]
+		assert.False(t, present, "unknown column %q must be omitted (NULL), not set to \"\"", k)
+	}
+}
+
+func TestUserConfigsToRows_AllKnown(t *testing.T) {
+	t.Parallel()
+	configs := []*UserConfig{{
+		UID:                    "501",
+		FingerprintsRegistered: "2",
+		Unlock:                 "1",
+		ApplePay:               "0",
+		EffectiveUnlock:        "1",
+		EffectiveApplePay:      "0",
+	}}
+	rows := userConfigsToRows(configs)
+	require.Len(t, rows, 1)
+	assert.Equal(t, map[string]string{
+		"uid":                     "501",
+		"fingerprints_registered": "2",
+		"touchid_unlock":          "1",
+		"touchid_applepay":        "0",
+		"effective_unlock":        "1",
+		"effective_applepay":      "0",
+	}, rows[0])
+}
+
 func columnNames(cols []table.ColumnDefinition) []string {
 	names := make([]string, len(cols))
 	for i, c := range cols {
