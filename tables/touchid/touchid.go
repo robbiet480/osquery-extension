@@ -1,0 +1,419 @@
+// Package touchid implements two osquery tables that report macOS Touch ID
+// state, populated from bioutil(1) and ioreg(8):
+//
+//   - touchid_system_config: machine-wide Touch ID / Secure Enclave posture,
+//     plus whether a usable fingerprint sensor (built-in or an attached Touch
+//     ID accessory) is actually present.
+//   - touchid_user_config: per-user Touch ID configuration and the number of
+//     enrolled fingerprints.
+//
+// Apple Silicon only. bioutil reports Touch ID state; the sensor-presence
+// columns come from the IORegistry. Both tables shell out via an injected
+// utils.CmdRunner so they are unit-testable without touching real binaries.
+package touchid
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"fmt"
+	"os/user"
+	"strconv"
+	"strings"
+
+	"github.com/macadmins/osquery-extension/pkg/utils"
+	"github.com/micromdm/plist"
+	"github.com/osquery/osquery-go/plugin/table"
+)
+
+const (
+	bioutilPath = "/usr/bin/bioutil"
+	ioregPath   = "/usr/sbin/ioreg"
+	dsclPath    = "/usr/bin/dscl"
+)
+
+// minHumanUID / maxHumanUID bound real (non-system) local accounts. macOS
+// reserves uids below 500 for system/service accounts; the first human account
+// is 501. 60000+ are transient/Setup Assistant accounts.
+const (
+	minHumanUID = 501
+	maxHumanUID = 60000
+)
+
+// parseBioutil parses the "Label: value" lines emitted by `bioutil -r` /
+// `bioutil -r -s` into a map keyed by label. Keying on the label text (rather
+// than line position) keeps the tables correct on macOS releases that add
+// configuration lines. Section headers ("System Touch ID configuration:") and
+// the trailing "Operation performed successfully." line have no value after the
+// colon and are skipped.
+func parseBioutil(out []byte) map[string]string {
+	fields := make(map[string]string)
+	s := bufio.NewScanner(bytes.NewReader(out))
+	for s.Scan() {
+		line := strings.TrimSpace(s.Text())
+		idx := strings.Index(line, ":")
+		if idx < 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:idx])
+		val := strings.TrimSpace(line[idx+1:])
+		if key == "" || val == "" {
+			continue
+		}
+		fields[key] = val
+	}
+	return fields
+}
+
+// boolField returns "1" if the named bioutil field equals "1", else "0".
+// bioutil reports these flags as the literal characters 0/1.
+func boolField(fields map[string]string, key string) string {
+	if fields[key] == "1" {
+		return "1"
+	}
+	return "0"
+}
+
+// boolValue renders a Go bool as osquery's "1"/"0" integer-column convention.
+func boolValue(b bool) string {
+	if b {
+		return "1"
+	}
+	return "0"
+}
+
+// ioregClassPresent reports whether the IORegistry contains at least one
+// instance of the given class. `ioreg -a -r -c <class>` emits a plist array of
+// matched nodes, or empty output when the class has no instances. We unmarshal
+// to a slice and check its length; empty/unparseable output is treated as "not
+// present".
+func ioregClassPresent(cmder utils.CmdRunner, class string) (bool, error) {
+	buf, err := cmder.RunCmd(ioregPath, "-a", "-r", "-c", class)
+	if err != nil {
+		return false, fmt.Errorf("could not run ioreg for %s: %w", class, err)
+	}
+	if len(bytes.TrimSpace(buf)) == 0 {
+		// No instances: ioreg prints nothing.
+		return false, nil
+	}
+	var nodes []map[string]interface{}
+	if err := plist.Unmarshal(buf, &nodes); err != nil {
+		// Unexpected shape — be conservative and report not present rather than
+		// erroring the whole table.
+		return false, nil
+	}
+	return len(nodes) > 0, nil
+}
+
+// SystemConfig holds the machine-wide Touch ID posture for one host.
+type SystemConfig struct {
+	Compatible    string // touchid_compatible: bioutil reports Secure Enclave biometric support
+	SecureEnclave string // secure_enclave: SoC model identifier
+	Enabled       string // touchid_enabled
+	Unlock        string // touchid_unlock
+	Builtin       string // touchid_builtin: a built-in AppleBiometricSensor node exists (laptops)
+	SensorPresent string // touchid_sensor_present: built-in OR an attached Touch ID accessory
+}
+
+// chipModelFromSPiBridge extracts the SoC model identifier (e.g. "Mac16,5")
+// from `ioreg -a ... AppleARMPE`... but bioutil already covers compatibility,
+// so secure_enclave is sourced from system_profiler SPiBridgeDataType, parsed
+// here from its plain-text "Model Identifier:" line.
+func chipModelFromSPiBridge(out []byte) string {
+	s := bufio.NewScanner(bytes.NewReader(out))
+	for s.Scan() {
+		line := strings.TrimSpace(s.Text())
+		const k = "Model Identifier:"
+		if strings.HasPrefix(line, k) {
+			return strings.TrimSpace(strings.TrimPrefix(line, k))
+		}
+	}
+	return ""
+}
+
+// GetSystemConfig builds the single touchid_system_config row. bioutil supplies
+// the compatibility/enabled/unlock flags; ioreg supplies the hardware-presence
+// flags. The two ioreg-derived columns are independent of bioutil, so they are
+// always populated even when bioutil fails.
+func GetSystemConfig(cmder utils.CmdRunner) (*SystemConfig, error) {
+	cfg := &SystemConfig{
+		Compatible:    "0",
+		Enabled:       "0",
+		Unlock:        "0",
+		Builtin:       "0",
+		SensorPresent: "0",
+	}
+
+	if out, err := cmder.RunCmd("/usr/sbin/system_profiler", "SPiBridgeDataType"); err == nil {
+		cfg.SecureEnclave = chipModelFromSPiBridge(out)
+	}
+
+	if out, err := cmder.RunCmd(bioutilPath, "-r", "-s"); err == nil {
+		fields := parseBioutil(out)
+		if _, ok := fields["Biometrics functionality"]; ok {
+			cfg.Compatible = "1"
+		}
+		cfg.Enabled = boolField(fields, "Biometrics functionality")
+		cfg.Unlock = boolField(fields, "Biometrics for unlock")
+	}
+
+	// Built-in sensor: laptops expose one or more AppleBiometricSensor nodes;
+	// keyboard-less desktops expose none. NOTE: touchid_compatible above is "1"
+	// on every Apple Silicon Mac (the Secure Enclave is on-die), so it cannot
+	// distinguish a Mac that has a fingerprint sensor from a keyboard-less
+	// desktop — that is what touchid_builtin / touchid_sensor_present are for.
+	builtin, err := ioregClassPresent(cmder, "AppleBiometricSensor")
+	if err != nil {
+		return nil, err
+	}
+	cfg.Builtin = boolValue(builtin)
+
+	// Any usable sensor: built-in OR an attached external Touch ID sensor (e.g.
+	// a Magic Keyboard with Touch ID), which registers no AppleBiometricSensor
+	// node but does register an AppleMesaAccessory node ("Mesa" is Apple's
+	// codename for the Touch ID sensor subsystem; the "Accessory" suffix denotes
+	// an external sensor). This is a capability class, not a product-string
+	// match, so a non-Touch-ID keyboard correctly reads as no sensor. The
+	// sibling classes AppleMesaSEPDriver / AppleMesaResources are NOT usable for
+	// this — they are SEP scaffolding present on every Apple Silicon Mac.
+	sensorPresent := builtin
+	if !sensorPresent {
+		mesa, err := ioregClassPresent(cmder, "AppleMesaAccessory")
+		if err != nil {
+			return nil, err
+		}
+		sensorPresent = mesa
+	}
+	cfg.SensorPresent = boolValue(sensorPresent)
+
+	return cfg, nil
+}
+
+// TouchIDSystemConfigColumns is the schema for touchid_system_config.
+func TouchIDSystemConfigColumns() []table.ColumnDefinition {
+	return []table.ColumnDefinition{
+		table.IntegerColumn("touchid_compatible"),
+		table.TextColumn("secure_enclave"),
+		table.IntegerColumn("touchid_enabled"),
+		table.IntegerColumn("touchid_unlock"),
+		table.IntegerColumn("touchid_builtin"),
+		table.IntegerColumn("touchid_sensor_present"),
+	}
+}
+
+// TouchIDSystemConfigGenerate is the osquery generate function for
+// touchid_system_config.
+func TouchIDSystemConfigGenerate(ctx context.Context, queryContext table.QueryContext) ([]map[string]string, error) {
+	cfg, err := GetSystemConfig(utils.NewRunner().Runner)
+	if err != nil {
+		return nil, err
+	}
+	return []map[string]string{{
+		"touchid_compatible":     cfg.Compatible,
+		"secure_enclave":         cfg.SecureEnclave,
+		"touchid_enabled":        cfg.Enabled,
+		"touchid_unlock":         cfg.Unlock,
+		"touchid_builtin":        cfg.Builtin,
+		"touchid_sensor_present": cfg.SensorPresent,
+	}}, nil
+}
+
+// parseFingerprintCounts extracts enrolled-template counts from `bioutil -c`
+// (single user) or `bioutil -c -s` (all enrolled users, root) output, keyed by
+// uid. Lines look like "User 501:\t1 biometric template(s)". Users with zero
+// enrolled templates do not appear in `-c -s` output, so a uid absent from the
+// returned map should be treated as count 0 when the counts are known.
+func parseFingerprintCounts(out []byte) map[string]int {
+	counts := make(map[string]int)
+	s := bufio.NewScanner(bytes.NewReader(out))
+	for s.Scan() {
+		fields := strings.Fields(s.Text())
+		if len(fields) < 4 || fields[0] != "User" {
+			continue
+		}
+		uid := strings.TrimSuffix(fields[1], ":")
+		if _, err := strconv.Atoi(uid); err != nil {
+			continue
+		}
+		for i, f := range fields {
+			if strings.HasPrefix(f, "biometric") && i > 0 {
+				if n, err := strconv.Atoi(fields[i-1]); err == nil {
+					counts[uid] = n
+				}
+				break
+			}
+		}
+	}
+	return counts
+}
+
+// parseLocalUIDs parses `dscl . -list /Users UniqueID` (two columns: account
+// name, uid) and returns the uids of real local accounts within the human-uid
+// range.
+func parseLocalUIDs(out []byte) []string {
+	var uids []string
+	s := bufio.NewScanner(bytes.NewReader(out))
+	for s.Scan() {
+		fields := strings.Fields(s.Text())
+		if len(fields) != 2 {
+			continue
+		}
+		n, err := strconv.Atoi(fields[1])
+		if err != nil || n < minHumanUID || n > maxHumanUID {
+			continue
+		}
+		uids = append(uids, fields[1])
+	}
+	return uids
+}
+
+// uidExists is injected so tests don't depend on real local accounts.
+type uidExists func(uid string) bool
+
+func defaultUIDExists(uid string) bool {
+	_, err := user.LookupId(uid)
+	return err == nil
+}
+
+// UserConfig is one touchid_user_config row.
+type UserConfig struct {
+	UID                    string
+	FingerprintsRegistered string // empty when unknown (e.g. -c -s could not run)
+	Unlock                 string // empty when unknown (user not logged in)
+	ApplePay               string
+	EffectiveUnlock        string
+	EffectiveApplePay      string
+}
+
+// GetUserConfigs builds touchid_user_config rows. Two bioutil data sources with
+// different access models are combined:
+//
+//   - Enrolled fingerprint count: `bioutil -c -s` (run as root, the context
+//     osquery's extension runner provides) reports counts for all enrolled
+//     users at once and does not require the user to be logged in.
+//   - Config flags: `bioutil -r` must run inside the target user's login
+//     session, which only exists while that user is logged in. When it cannot
+//     be read the flag columns are left empty (unknown) rather than "0", so an
+//     enabled-but-logged-out user is not misreported as disabled.
+//
+// targetUIDs, when non-empty, restricts the rows (from a `WHERE uid =`
+// constraint); otherwise every real local account is reported. perUserRunner
+// runs `bioutil -r` as a given uid; it is injected for testability.
+func GetUserConfigs(
+	cmder utils.CmdRunner,
+	exists uidExists,
+	targetUIDs []string,
+	perUserRunner func(uid string) ([]byte, error),
+) ([]*UserConfig, error) {
+	counts := map[string]int{}
+	countsKnown := false
+	if out, err := cmder.RunCmd(bioutilPath, "-c", "-s"); err == nil {
+		counts = parseFingerprintCounts(out)
+		countsKnown = true
+	}
+
+	uids := targetUIDs
+	if len(uids) == 0 {
+		if out, err := cmder.RunCmd(dsclPath, ".", "-list", "/Users", "UniqueID"); err == nil {
+			uids = parseLocalUIDs(out)
+		}
+	}
+
+	var results []*UserConfig
+	for _, uid := range uids {
+		if _, err := strconv.Atoi(uid); err != nil || !exists(uid) {
+			continue
+		}
+
+		row := &UserConfig{UID: uid}
+
+		count, hasCount := counts[uid]
+		if countsKnown {
+			hasCount = true // absent from -c -s output means 0 enrolled
+		}
+		if hasCount {
+			row.FingerprintsRegistered = strconv.Itoa(count)
+		}
+
+		if out, err := perUserRunner(uid); err == nil {
+			fields := parseBioutil(out)
+			row.Unlock = boolField(fields, "Biometrics for unlock")
+			row.ApplePay = boolField(fields, "Biometrics for ApplePay")
+			row.EffectiveUnlock = boolField(fields, "Effective biometrics for unlock")
+			row.EffectiveApplePay = boolField(fields, "Effective biometrics for ApplePay")
+
+			// bioutil's "Effective" flags can report 1 with no fingerprints
+			// enrolled. Only correct this when the count is known to be 0.
+			if hasCount && count == 0 {
+				row.EffectiveUnlock = "0"
+				row.EffectiveApplePay = "0"
+			}
+		}
+
+		results = append(results, row)
+	}
+
+	return results, nil
+}
+
+// TouchIDUserConfigColumns is the schema for touchid_user_config.
+func TouchIDUserConfigColumns() []table.ColumnDefinition {
+	return []table.ColumnDefinition{
+		table.IntegerColumn("uid"),
+		table.IntegerColumn("fingerprints_registered"),
+		table.IntegerColumn("touchid_unlock"),
+		table.IntegerColumn("touchid_applepay"),
+		table.IntegerColumn("effective_unlock"),
+		table.IntegerColumn("effective_applepay"),
+	}
+}
+
+// uidConstraints extracts the values of all `uid =` constraints from the query.
+func uidConstraints(queryContext table.QueryContext) []string {
+	var uids []string
+	if c, ok := queryContext.Constraints["uid"]; ok {
+		for _, con := range c.Constraints {
+			if con.Operator == table.OperatorEquals {
+				uids = append(uids, con.Expression)
+			}
+		}
+	}
+	return uids
+}
+
+// defaultPerUserRunner runs `bioutil -r` inside the target uid's login session
+// via `launchctl asuser`, which is required because per-user Touch ID config
+// lives in that user's Secure Enclave keybag context.
+func defaultPerUserRunner(cmder utils.CmdRunner) func(uid string) ([]byte, error) {
+	return func(uid string) ([]byte, error) {
+		return cmder.RunCmd("/bin/launchctl", "asuser", uid, bioutilPath, "-r")
+	}
+}
+
+// TouchIDUserConfigGenerate is the osquery generate function for
+// touchid_user_config.
+func TouchIDUserConfigGenerate(ctx context.Context, queryContext table.QueryContext) ([]map[string]string, error) {
+	runner := utils.NewRunner().Runner
+	configs, err := GetUserConfigs(runner, defaultUIDExists, uidConstraints(queryContext), defaultPerUserRunner(runner))
+	if err != nil {
+		return nil, err
+	}
+
+	var results []map[string]string
+	for _, c := range configs {
+		row := map[string]string{"uid": c.UID}
+		// Only set keys we actually know; an unknown IntegerColumn must be
+		// omitted (NULL) rather than set to an empty/zero value.
+		if c.FingerprintsRegistered != "" {
+			row["fingerprints_registered"] = c.FingerprintsRegistered
+		}
+		if c.Unlock != "" {
+			row["touchid_unlock"] = c.Unlock
+			row["touchid_applepay"] = c.ApplePay
+			row["effective_unlock"] = c.EffectiveUnlock
+			row["effective_applepay"] = c.EffectiveApplePay
+		}
+		results = append(results, row)
+	}
+	return results, nil
+}
