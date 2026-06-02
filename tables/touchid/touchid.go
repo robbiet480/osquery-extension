@@ -40,6 +40,21 @@ const (
 	maxHumanUID = 60000
 )
 
+// maxScanLine is the per-line buffer cap for the parsers below. bioutil/dscl
+// lines are short, but a generous cap avoids bufio.Scanner's default 64KiB
+// bufio.ErrTooLong on unexpectedly long output, which would otherwise truncate
+// a parse silently.
+const maxScanLine = 1 << 20 // 1 MiB
+
+// newLineScanner returns a line scanner over out with an enlarged buffer so a
+// long line cannot silently truncate the parse. Callers should check Err()
+// after the loop.
+func newLineScanner(out []byte) *bufio.Scanner {
+	s := bufio.NewScanner(bytes.NewReader(out))
+	s.Buffer(make([]byte, 0, 64*1024), maxScanLine)
+	return s
+}
+
 // parseBioutil parses the "Label: value" lines emitted by `bioutil -r` /
 // `bioutil -r -s` into a map keyed by label. Keying on the label text (rather
 // than line position) keeps the tables correct on macOS releases that add
@@ -48,7 +63,7 @@ const (
 // colon and are skipped.
 func parseBioutil(out []byte) map[string]string {
 	fields := make(map[string]string)
-	s := bufio.NewScanner(bytes.NewReader(out))
+	s := newLineScanner(out)
 	for s.Scan() {
 		line := strings.TrimSpace(s.Text())
 		idx := strings.Index(line, ":")
@@ -61,6 +76,13 @@ func parseBioutil(out []byte) map[string]string {
 			continue
 		}
 		fields[key] = val
+	}
+	if s.Err() != nil {
+		// A read/tokenization error means the output was only partially parsed.
+		// Discard it rather than returning fields built from a truncated read;
+		// callers treat absent keys as "unknown" (NULL), which is the correct,
+		// safe degradation.
+		return map[string]string{}
 	}
 	return fields
 }
@@ -115,22 +137,6 @@ type SystemConfig struct {
 	SensorPresent string // touchid_sensor_present: built-in OR an attached Touch ID accessory
 }
 
-// chipModelFromSPiBridge extracts the SoC model identifier (e.g. "Mac16,5")
-// from `ioreg -a ... AppleARMPE`... but bioutil already covers compatibility,
-// so secure_enclave is sourced from system_profiler SPiBridgeDataType, parsed
-// here from its plain-text "Model Identifier:" line.
-func chipModelFromSPiBridge(out []byte) string {
-	s := bufio.NewScanner(bytes.NewReader(out))
-	for s.Scan() {
-		line := strings.TrimSpace(s.Text())
-		const k = "Model Identifier:"
-		if strings.HasPrefix(line, k) {
-			return strings.TrimSpace(strings.TrimPrefix(line, k))
-		}
-	}
-	return ""
-}
-
 // GetSystemConfig builds the single touchid_system_config row. bioutil supplies
 // the compatibility/enabled/unlock flags; ioreg supplies the hardware-presence
 // flags. The two ioreg-derived columns are independent of bioutil, so they are
@@ -144,8 +150,11 @@ func GetSystemConfig(cmder utils.CmdRunner) (*SystemConfig, error) {
 		SensorPresent: "0",
 	}
 
-	if out, err := cmder.RunCmd("/usr/sbin/system_profiler", "SPiBridgeDataType"); err == nil {
-		cfg.SecureEnclave = chipModelFromSPiBridge(out)
+	// secure_enclave is the SoC / model identifier (e.g. "Mac16,5"). sysctl
+	// returns it directly and cheaply; we avoid system_profiler here because it
+	// can take seconds and would add noticeable latency to every query.
+	if out, err := cmder.RunCmd("/usr/sbin/sysctl", "-n", "hw.model"); err == nil {
+		cfg.SecureEnclave = strings.TrimSpace(string(out))
 	}
 
 	if out, err := cmder.RunCmd(bioutilPath, "-r", "-s"); err == nil {
@@ -225,7 +234,7 @@ func TouchIDSystemConfigGenerate(ctx context.Context, queryContext table.QueryCo
 // returned map should be treated as count 0 when the counts are known.
 func parseFingerprintCounts(out []byte) map[string]int {
 	counts := make(map[string]int)
-	s := bufio.NewScanner(bytes.NewReader(out))
+	s := newLineScanner(out)
 	for s.Scan() {
 		fields := strings.Fields(s.Text())
 		if len(fields) < 4 || fields[0] != "User" {
@@ -244,6 +253,11 @@ func parseFingerprintCounts(out []byte) map[string]int {
 			}
 		}
 	}
+	if s.Err() != nil {
+		// Truncated read: report counts as unknown rather than from a partial
+		// parse (the caller distinguishes "no counts" from "user has 0").
+		return map[string]int{}
+	}
 	return counts
 }
 
@@ -252,7 +266,7 @@ func parseFingerprintCounts(out []byte) map[string]int {
 // range.
 func parseLocalUIDs(out []byte) []string {
 	var uids []string
-	s := bufio.NewScanner(bytes.NewReader(out))
+	s := newLineScanner(out)
 	for s.Scan() {
 		fields := strings.Fields(s.Text())
 		if len(fields) != 2 {
@@ -263,6 +277,9 @@ func parseLocalUIDs(out []byte) []string {
 			continue
 		}
 		uids = append(uids, fields[1])
+	}
+	if s.Err() != nil {
+		return nil
 	}
 	return uids
 }

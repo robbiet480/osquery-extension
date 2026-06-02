@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/macadmins/osquery-extension/pkg/utils"
+	"github.com/osquery/osquery-go/plugin/table"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,10 +30,9 @@ Operation performed successfully.`
 // `bioutil -c -s` (root): one line per enrolled user.
 const allCounts = "User 501:\t1 biometric template(s)\nUser 503:\t2 biometric template(s)\nOperation performed successfully."
 
-const spiBridge = `Controller:
-
-      Model Identifier: Mac16,5
-      Firmware Version: mBoot-18000.120.36`
+// `sysctl -n hw.model` output: the SoC / model identifier, with a trailing
+// newline (reported as secure_enclave).
+const sysctlModel = "Mac16,5\n"
 
 const dsclUsers = "_mbsetupuser  248\nroot  0\nalice  501\nbob  503\n"
 
@@ -81,12 +81,6 @@ func TestParseLocalUIDs(t *testing.T) {
 	assert.Equal(t, []string{"501", "503"}, parseLocalUIDs([]byte(dsclUsers)))
 }
 
-func TestChipModelFromSPiBridge(t *testing.T) {
-	t.Parallel()
-	assert.Equal(t, "Mac16,5", chipModelFromSPiBridge([]byte(spiBridge)))
-	assert.Equal(t, "", chipModelFromSPiBridge([]byte("no model here")))
-}
-
 func TestIORegClassPresent(t *testing.T) {
 	t.Parallel()
 	present := utils.MockCmdRunner{Output: ioregOneNode}
@@ -105,7 +99,7 @@ func TestIORegClassPresent(t *testing.T) {
 func systemRunner(builtinIOReg, mesaIOReg string) utils.MultiMockCmdRunner {
 	return utils.MultiMockCmdRunner{
 		Commands: map[string]utils.MockCmdRunner{
-			"/usr/sbin/system_profiler SPiBridgeDataType":   {Output: spiBridge},
+			"/usr/sbin/sysctl -n hw.model":                  {Output: sysctlModel},
 			"/usr/bin/bioutil -r -s":                        {Output: systemBioutil},
 			"/usr/sbin/ioreg -a -r -c AppleBiometricSensor": {Output: builtinIOReg},
 			"/usr/sbin/ioreg -a -r -c AppleMesaAccessory":   {Output: mesaIOReg},
@@ -153,7 +147,7 @@ func TestGetSystemConfig_BioutilError(t *testing.T) {
 	// bioutil fails, but the ioreg-derived columns must still be populated.
 	runner := utils.MultiMockCmdRunner{
 		Commands: map[string]utils.MockCmdRunner{
-			"/usr/sbin/system_profiler SPiBridgeDataType":   {Output: spiBridge},
+			"/usr/sbin/sysctl -n hw.model":                  {Output: sysctlModel},
 			"/usr/bin/bioutil -r -s":                        {Err: errors.New("boom")},
 			"/usr/sbin/ioreg -a -r -c AppleBiometricSensor": {Output: ioregOneNode},
 			"/usr/sbin/ioreg -a -r -c AppleMesaAccessory":   {Output: ioregNoNode},
@@ -262,14 +256,21 @@ func TestGetUserConfigs_SkipsNonexistentUID(t *testing.T) {
 	assert.Empty(t, configs)
 }
 
+func columnNames(cols []table.ColumnDefinition) []string {
+	names := make([]string, len(cols))
+	for i, c := range cols {
+		names[i] = c.Name
+	}
+	return names
+}
+
 func TestColumns(t *testing.T) {
 	t.Parallel()
-	sys := []string{"touchid_compatible", "secure_enclave", "touchid_enabled", "touchid_unlock", "touchid_builtin", "touchid_sensor_present"}
-	for i, c := range TouchIDSystemConfigColumns() {
-		assert.Equal(t, sys[i], c.Name)
-	}
-	usr := []string{"uid", "fingerprints_registered", "touchid_unlock", "touchid_applepay", "effective_unlock", "effective_applepay"}
-	for i, c := range TouchIDUserConfigColumns() {
-		assert.Equal(t, usr[i], c.Name)
-	}
+	// Compare full name slices so a count/order mismatch is a clean assertion
+	// failure rather than an index-out-of-range panic.
+	wantSys := []string{"touchid_compatible", "secure_enclave", "touchid_enabled", "touchid_unlock", "touchid_builtin", "touchid_sensor_present"}
+	assert.Equal(t, wantSys, columnNames(TouchIDSystemConfigColumns()))
+
+	wantUsr := []string{"uid", "fingerprints_registered", "touchid_unlock", "touchid_applepay", "effective_unlock", "effective_applepay"}
+	assert.Equal(t, wantUsr, columnNames(TouchIDUserConfigColumns()))
 }
