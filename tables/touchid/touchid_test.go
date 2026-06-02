@@ -55,7 +55,8 @@ const ioregNoNode = ``
 
 func TestParseBioutil(t *testing.T) {
 	t.Parallel()
-	f := parseBioutil([]byte(systemBioutil))
+	f, ok := parseBioutil([]byte(systemBioutil))
+	require.True(t, ok)
 	assert.Equal(t, "1", f["Biometrics functionality"])
 	assert.Equal(t, "1", f["Biometrics for unlock"])
 	_, hasHeader := f["System Touch ID configuration"]
@@ -64,15 +65,37 @@ func TestParseBioutil(t *testing.T) {
 	assert.False(t, hasFooter, "footer line should not parse as a field")
 }
 
+func TestNullableBoolField(t *testing.T) {
+	t.Parallel()
+	fields := map[string]string{"on": "1", "off": "0"}
+
+	v, ok := nullableBoolField(fields, "on")
+	assert.True(t, ok)
+	assert.Equal(t, "1", v)
+
+	v, ok = nullableBoolField(fields, "off")
+	assert.True(t, ok)
+	assert.Equal(t, "0", v)
+
+	// Absent key => unknown (NULL), not "0".
+	v, ok = nullableBoolField(fields, "missing")
+	assert.False(t, ok)
+	assert.Equal(t, "", v)
+}
+
 func TestParseFingerprintCounts(t *testing.T) {
 	t.Parallel()
-	got := parseFingerprintCounts([]byte(allCounts))
+	got, ok := parseFingerprintCounts([]byte(allCounts))
+	require.True(t, ok)
 	assert.Equal(t, map[string]int{"501": 1, "503": 2}, got)
 
-	single := parseFingerprintCounts([]byte("User 501:\t3 biometric template(s)\nOperation performed successfully."))
+	single, ok := parseFingerprintCounts([]byte("User 501:\t3 biometric template(s)\nOperation performed successfully."))
+	require.True(t, ok)
 	assert.Equal(t, 3, single["501"])
 
-	assert.Empty(t, parseFingerprintCounts([]byte("nonsense\nOperation performed successfully.")))
+	empty, ok := parseFingerprintCounts([]byte("nonsense\nOperation performed successfully."))
+	require.True(t, ok) // a well-formed read with no matching lines is still "known"
+	assert.Empty(t, empty)
 }
 
 func TestParseLocalUIDs(t *testing.T) {

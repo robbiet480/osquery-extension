@@ -30,6 +30,7 @@ const (
 	bioutilPath = "/usr/bin/bioutil"
 	ioregPath   = "/usr/sbin/ioreg"
 	dsclPath    = "/usr/bin/dscl"
+	sysctlPath  = "/usr/sbin/sysctl"
 )
 
 // minHumanUID / maxHumanUID bound real (non-system) local accounts. macOS
@@ -61,7 +62,10 @@ func newLineScanner(out []byte) *bufio.Scanner {
 // configuration lines. Section headers ("System Touch ID configuration:") and
 // the trailing "Operation performed successfully." line have no value after the
 // colon and are skipped.
-func parseBioutil(out []byte) map[string]string {
+// parseBioutil returns the parsed fields and ok=false if a scanner read error
+// left the output only partially parsed (so callers can treat the result as
+// unknown rather than trusting a truncated parse).
+func parseBioutil(out []byte) (map[string]string, bool) {
 	fields := make(map[string]string)
 	s := newLineScanner(out)
 	for s.Scan() {
@@ -78,22 +82,34 @@ func parseBioutil(out []byte) map[string]string {
 		fields[key] = val
 	}
 	if s.Err() != nil {
-		// A read/tokenization error means the output was only partially parsed.
-		// Discard it rather than returning fields built from a truncated read;
-		// callers treat absent keys as "unknown" (NULL), which is the correct,
-		// safe degradation.
-		return map[string]string{}
+		return nil, false
 	}
-	return fields
+	return fields, true
 }
 
 // boolField returns "1" if the named bioutil field equals "1", else "0".
-// bioutil reports these flags as the literal characters 0/1.
+// bioutil reports these flags as the literal characters 0/1. Use this only for
+// fields bioutil is guaranteed to emit; for fields that may be absent (and
+// where absent must mean "unknown", not "disabled"), use nullableBoolField.
 func boolField(fields map[string]string, key string) string {
 	if fields[key] == "1" {
 		return "1"
 	}
 	return "0"
+}
+
+// nullableBoolField returns "1"/"0" when the key is present, or "" (NULL) when
+// it is absent — so a field bioutil did not emit (e.g. on a macOS version that
+// omits it) is reported as unknown rather than silently "disabled".
+func nullableBoolField(fields map[string]string, key string) (string, bool) {
+	v, ok := fields[key]
+	if !ok {
+		return "", false
+	}
+	if v == "1" {
+		return "1", true
+	}
+	return "0", true
 }
 
 // boolValue renders a Go bool as osquery's "1"/"0" integer-column convention.
@@ -153,17 +169,18 @@ func GetSystemConfig(cmder utils.CmdRunner) (*SystemConfig, error) {
 	// secure_enclave is the SoC / model identifier (e.g. "Mac16,5"). sysctl
 	// returns it directly and cheaply; we avoid system_profiler here because it
 	// can take seconds and would add noticeable latency to every query.
-	if out, err := cmder.RunCmd("/usr/sbin/sysctl", "-n", "hw.model"); err == nil {
+	if out, err := cmder.RunCmd(sysctlPath, "-n", "hw.model"); err == nil {
 		cfg.SecureEnclave = strings.TrimSpace(string(out))
 	}
 
 	if out, err := cmder.RunCmd(bioutilPath, "-r", "-s"); err == nil {
-		fields := parseBioutil(out)
-		if _, ok := fields["Biometrics functionality"]; ok {
-			cfg.Compatible = "1"
+		if fields, ok := parseBioutil(out); ok {
+			if _, present := fields["Biometrics functionality"]; present {
+				cfg.Compatible = "1"
+			}
+			cfg.Enabled = boolField(fields, "Biometrics functionality")
+			cfg.Unlock = boolField(fields, "Biometrics for unlock")
 		}
-		cfg.Enabled = boolField(fields, "Biometrics functionality")
-		cfg.Unlock = boolField(fields, "Biometrics for unlock")
 	}
 
 	// Built-in sensor: laptops expose one or more AppleBiometricSensor nodes;
@@ -231,8 +248,11 @@ func TouchIDSystemConfigGenerate(ctx context.Context, queryContext table.QueryCo
 // (single user) or `bioutil -c -s` (all enrolled users, root) output, keyed by
 // uid. Lines look like "User 501:\t1 biometric template(s)". Users with zero
 // enrolled templates do not appear in `-c -s` output, so a uid absent from the
-// returned map should be treated as count 0 when the counts are known.
-func parseFingerprintCounts(out []byte) map[string]int {
+// returned map should be treated as count 0 when ok is true. ok is false if a
+// scanner read error left the output only partially parsed, so the caller can
+// treat the counts as unknown (NOT "everyone has 0") rather than trusting a
+// truncated parse.
+func parseFingerprintCounts(out []byte) (map[string]int, bool) {
 	counts := make(map[string]int)
 	s := newLineScanner(out)
 	for s.Scan() {
@@ -254,11 +274,9 @@ func parseFingerprintCounts(out []byte) map[string]int {
 		}
 	}
 	if s.Err() != nil {
-		// Truncated read: report counts as unknown rather than from a partial
-		// parse (the caller distinguishes "no counts" from "user has 0").
-		return map[string]int{}
+		return nil, false
 	}
-	return counts
+	return counts, true
 }
 
 // parseLocalUIDs parses `dscl . -list /Users UniqueID` (two columns: account
@@ -325,8 +343,9 @@ func GetUserConfigs(
 	counts := map[string]int{}
 	countsKnown := false
 	if out, err := cmder.RunCmd(bioutilPath, "-c", "-s"); err == nil {
-		counts = parseFingerprintCounts(out)
-		countsKnown = true
+		// Only treat counts as known if parsing actually succeeded — a truncated
+		// parse must not be reported as "everyone has 0 enrolled".
+		counts, countsKnown = parseFingerprintCounts(out)
 	}
 
 	uids := targetUIDs
@@ -353,17 +372,26 @@ func GetUserConfigs(
 		}
 
 		if out, err := perUserRunner(uid); err == nil {
-			fields := parseBioutil(out)
-			row.Unlock = boolField(fields, "Biometrics for unlock")
-			row.ApplePay = boolField(fields, "Biometrics for ApplePay")
-			row.EffectiveUnlock = boolField(fields, "Effective biometrics for unlock")
-			row.EffectiveApplePay = boolField(fields, "Effective biometrics for ApplePay")
+			if fields, ok := parseBioutil(out); ok {
+				// Use nullableBoolField so a flag bioutil did not emit (e.g. on a
+				// macOS version that omits it) is reported as unknown (NULL),
+				// not silently "0"/disabled.
+				row.Unlock, _ = nullableBoolField(fields, "Biometrics for unlock")
+				row.ApplePay, _ = nullableBoolField(fields, "Biometrics for ApplePay")
+				row.EffectiveUnlock, _ = nullableBoolField(fields, "Effective biometrics for unlock")
+				row.EffectiveApplePay, _ = nullableBoolField(fields, "Effective biometrics for ApplePay")
 
-			// bioutil's "Effective" flags can report 1 with no fingerprints
-			// enrolled. Only correct this when the count is known to be 0.
-			if hasCount && count == 0 {
-				row.EffectiveUnlock = "0"
-				row.EffectiveApplePay = "0"
+				// bioutil's "Effective" flags can report 1 with no fingerprints
+				// enrolled. Only correct this when the count is known to be 0 and
+				// the effective flags were actually present.
+				if hasCount && count == 0 {
+					if row.EffectiveUnlock != "" {
+						row.EffectiveUnlock = "0"
+					}
+					if row.EffectiveApplePay != "" {
+						row.EffectiveApplePay = "0"
+					}
+				}
 			}
 		}
 
