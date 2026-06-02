@@ -105,6 +105,7 @@ func TestGenerateRows_CodeAbsentOmitsColumn(t *testing.T) {
 
 	rows, err := GenerateRows(g, func() string { return readModelName(cmder) })
 	require.NoError(t, err)
+	require.Len(t, rows, 1)
 	_, hasCode := rows[0]["color_code"]
 	assert.False(t, hasCode, "color_code must be omitted when the code is unknown")
 	assert.Equal(t, "Silver", rows[0]["color"])
@@ -122,6 +123,7 @@ func TestGenerateRows_SystemProfilerError(t *testing.T) {
 
 	rows, err := GenerateRows(g, func() string { return readModelName(cmder) })
 	require.NoError(t, err)
+	require.Len(t, rows, 1)
 	assert.Equal(t, "", rows[0]["model"])
 	assert.Equal(t, "Blue", rows[0]["color"])
 	assert.Equal(t, "5", rows[0]["color_code"])
