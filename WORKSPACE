@@ -9,7 +9,7 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 #
 # Pinned to 1.24.5: the last apple_support release that supports WORKSPACE mode
 # (2.0.0 dropped it), and >= 1.19.0 so wrapped_clang is built WITHOUT the
-# -Wl,-no_uuid workaround that macOS 26 (Tahoe) dyld rejects with
+# -Wl,-no_uuid workaround that recent macOS / dyld versions reject with
 # "missing LC_UUID load command" (apple_support PR #373; bazelbuild/bazel#27026).
 http_archive(
     name = "build_bazel_apple_support",
