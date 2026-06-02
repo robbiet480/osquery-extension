@@ -20,6 +20,7 @@ package macenclosurecolor
 import (
 	"context"
 	"strconv"
+	"sync"
 
 	"github.com/macadmins/osquery-extension/pkg/utils"
 	"github.com/osquery/osquery-go/plugin/table"
@@ -47,19 +48,20 @@ func MacEnclosureColorColumns() []table.ColumnDefinition {
 	}
 }
 
+// modelNameFunc returns the Mac's Model Name. Injected so GenerateRows is
+// testable without spawning system_profiler.
+type modelNameFunc func() string
+
 // GenerateRows builds the single mac_enclosure_color row. All external
 // dependencies are injected so the logic is unit-testable without cgo or
 // subprocesses.
-func GenerateRows(g Gestalt, cmder utils.CmdRunner) ([]map[string]string, error) {
+func GenerateRows(g Gestalt, modelName modelNameFunc) ([]map[string]string, error) {
 	productType, _ := g.String("ProductType")
 	code, codeKnown := g.Int("DeviceEnclosureColor")
 
 	// MobileGestalt's marketing-name keys return the OS name ("macOS") on
 	// recent macOS, so the Model Name comes from system_profiler instead.
-	model := ""
-	if out, err := cmder.RunCmd("/usr/sbin/system_profiler", "SPHardwareDataType", "-json"); err == nil {
-		model = parseModelName(out)
-	}
+	model := modelName()
 
 	row := map[string]string{
 		"color":        resolveColor(productType, model, code, codeKnown),
@@ -72,8 +74,33 @@ func GenerateRows(g Gestalt, cmder utils.CmdRunner) ([]map[string]string, error)
 	return []map[string]string{row}, nil
 }
 
+// readModelName fetches the Model Name from system_profiler. Split out so it can
+// be memoized (the model never changes for the process lifetime).
+func readModelName(cmder utils.CmdRunner) string {
+	out, err := cmder.RunCmd("/usr/sbin/system_profiler", "SPHardwareDataType", "-json")
+	if err != nil {
+		return ""
+	}
+	return parseModelName(out)
+}
+
+// model name is static per process; cache it so we don't spawn system_profiler
+// (which can take seconds) on every query.
+var (
+	modelOnce   sync.Once
+	cachedModel string
+)
+
+func cachedModelName() string {
+	modelOnce.Do(func() {
+		cachedModel = readModelName(utils.NewRunner().Runner)
+	})
+	return cachedModel
+}
+
 // MacEnclosureColorGenerate is the osquery generate function. It wires up the
-// production Gestalt (cgo on darwin, no-op elsewhere) and command runner.
+// production Gestalt (cgo on darwin, no-op elsewhere) and the memoized model
+// name lookup.
 func MacEnclosureColorGenerate(ctx context.Context, queryContext table.QueryContext) ([]map[string]string, error) {
-	return GenerateRows(newGestalt(), utils.NewRunner().Runner)
+	return GenerateRows(newGestalt(), cachedModelName)
 }

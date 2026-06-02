@@ -84,7 +84,7 @@ func TestGenerateRows(t *testing.T) {
 	}
 	cmder := utils.MockCmdRunner{Output: `{"SPHardwareDataType":[{"machine_name":"MacBook Pro"}]}`}
 
-	rows, err := GenerateRows(g, cmder)
+	rows, err := GenerateRows(g, func() string { return readModelName(cmder) })
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, "Space Black", rows[0]["color"])
@@ -103,7 +103,7 @@ func TestGenerateRows_CodeAbsentOmitsColumn(t *testing.T) {
 	}
 	cmder := utils.MockCmdRunner{Output: `{"SPHardwareDataType":[{"machine_name":"Mac Studio"}]}`}
 
-	rows, err := GenerateRows(g, cmder)
+	rows, err := GenerateRows(g, func() string { return readModelName(cmder) })
 	require.NoError(t, err)
 	_, hasCode := rows[0]["color_code"]
 	assert.False(t, hasCode, "color_code must be omitted when the code is unknown")
@@ -120,7 +120,7 @@ func TestGenerateRows_SystemProfilerError(t *testing.T) {
 	}
 	cmder := utils.MockCmdRunner{Err: assertErr{}}
 
-	rows, err := GenerateRows(g, cmder)
+	rows, err := GenerateRows(g, func() string { return readModelName(cmder) })
 	require.NoError(t, err)
 	assert.Equal(t, "", rows[0]["model"])
 	assert.Equal(t, "Blue", rows[0]["color"])

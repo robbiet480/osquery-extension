@@ -9,7 +9,15 @@ go_library(
         "modelname.go",
         "resolver.go",
     ],
-    cgo = True,
+    # cgo is only needed on Apple platforms (gestalt_darwin.go calls
+    # libMobileGestalt via CoreFoundation). Keep it false elsewhere so
+    # linux/windows builds stay strictly non-cgo / pure.
+    # keep
+    cgo = select({
+        "@io_bazel_rules_go//go/platform:darwin": True,
+        "@io_bazel_rules_go//go/platform:ios": True,
+        "//conditions:default": False,
+    }),
     clinkopts = select({
         "@io_bazel_rules_go//go/platform:darwin": [
             "-framework CoreFoundation",

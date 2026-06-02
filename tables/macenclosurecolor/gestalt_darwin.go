@@ -67,6 +67,7 @@ static char* mg_string(const char* key) {
 import "C"
 
 import (
+	"sync"
 	"unsafe"
 )
 
@@ -75,11 +76,17 @@ import (
 // dlsym lookup of MGCopyAnswer.
 type mobileGestalt struct{}
 
+// loadOnce guards the dlopen/dlsym so the dynamic-loader work happens exactly
+// once per process even if the table is queried concurrently. (The C side is
+// also idempotent, but the Go-side guard avoids redundant cgo calls and makes
+// initialization ordering explicit.)
+var loadOnce sync.Once
+
 // newGestalt loads libMobileGestalt.dylib and returns a Gestalt. If loading
 // fails, the returned Gestalt still satisfies the interface but every lookup
 // reports not-present.
 func newGestalt() Gestalt {
-	C.load_mg()
+	loadOnce.Do(func() { C.load_mg() })
 	return mobileGestalt{}
 }
 
