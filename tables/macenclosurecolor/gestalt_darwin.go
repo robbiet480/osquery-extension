@@ -6,6 +6,8 @@ package macenclosurecolor
 #cgo LDFLAGS: -framework CoreFoundation
 #include <CoreFoundation/CoreFoundation.h>
 #include <dlfcn.h>
+#include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
 
 typedef CFTypeRef (*MGCopyAnswerFn)(CFStringRef);
@@ -35,7 +37,18 @@ static int mg_int(const char* key) {
     } else if (tid == CFStringGetTypeID()) {
         char buf[64];
         if (CFStringGetCString((CFStringRef)v, buf, sizeof(buf), kCFStringEncodingUTF8)) {
-            result = atoi(buf);
+            // Checked conversion: atoi() returns 0 for non-numeric input, which
+            // would surface as a bogus code 0. strtol with an end-pointer lets
+            // us reject non-numeric / out-of-range values and return -1 so the
+            // Go side reports (0, false) rather than (0, true).
+            char* end = NULL;
+            errno = 0;
+            long n = strtol(buf, &end, 10);
+            if (end != buf && *end == '\0' && errno == 0 && n >= 0 && n <= INT_MAX) {
+                result = (int)n;
+            } else {
+                result = -1;
+            }
         }
     }
     CFRelease(v);

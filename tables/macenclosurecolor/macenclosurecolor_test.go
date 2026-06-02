@@ -38,7 +38,9 @@ func TestParseModelName(t *testing.T) {
 		{"malformed", `not json`, ""},
 	}
 	for _, c := range cases {
-		assert.Equal(t, c.want, parseModelName([]byte(c.json)), c.name)
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, parseModelName([]byte(c.json)))
+		})
 	}
 }
 
@@ -72,7 +74,9 @@ func TestResolveColor(t *testing.T) {
 		{"no code, no model rule", "Unknown1,1", "Mystery Mac", 0, false, "Unknown"},
 	}
 	for _, c := range cases {
-		assert.Equal(t, c.want, resolveColor(c.productType, c.model, c.code, c.codeKnown), c.name)
+		t.Run(c.name, func(t *testing.T) {
+			assert.Equal(t, c.want, resolveColor(c.productType, c.model, c.code, c.codeKnown))
+		})
 	}
 }
 
