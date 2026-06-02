@@ -165,6 +165,25 @@ func TestGetSystemConfig_NoSensor(t *testing.T) {
 	assert.Equal(t, "1", cfg.Compatible)
 }
 
+func TestGetSystemConfig_CompatibleFromValue(t *testing.T) {
+	t.Parallel()
+	// If bioutil reports "Biometrics functionality: 0", touchid_compatible must
+	// be "0" (derived from the value), not "1" from the key merely being present.
+	bioutilOff := "System Touch ID configuration:\n\tBiometrics functionality: 0\n\tBiometrics for unlock: 0\nOperation performed successfully."
+	runner := utils.MultiMockCmdRunner{
+		Commands: map[string]utils.MockCmdRunner{
+			"/usr/sbin/sysctl -n hw.model":                  {Output: sysctlModel},
+			"/usr/bin/bioutil -r -s":                        {Output: bioutilOff},
+			"/usr/sbin/ioreg -a -r -c AppleBiometricSensor": {Output: ioregNoNode},
+			"/usr/sbin/ioreg -a -r -c AppleMesaAccessory":   {Output: ioregNoNode},
+		},
+	}
+	cfg, err := GetSystemConfig(runner)
+	require.NoError(t, err)
+	assert.Equal(t, "0", cfg.Compatible)
+	assert.Equal(t, "0", cfg.Enabled)
+}
+
 func TestGetSystemConfig_BioutilError(t *testing.T) {
 	t.Parallel()
 	// bioutil fails, but the ioreg-derived columns must still be populated.

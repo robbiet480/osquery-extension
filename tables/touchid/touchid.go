@@ -33,9 +33,11 @@ const (
 	sysctlPath  = "/usr/sbin/sysctl"
 )
 
-// minHumanUID / maxHumanUID bound real (non-system) local accounts. macOS
-// reserves uids below 500 for system/service accounts; the first human account
-// is 501. 60000+ are transient/Setup Assistant accounts.
+// minHumanUID / maxHumanUID are the inclusive bounds for real (non-system)
+// local accounts. macOS reserves uids below 500 for system/service accounts;
+// the first human account is 501. Accounts above 60000 (e.g. transient /
+// Setup Assistant accounts) are excluded. The filter keeps uids in
+// [minHumanUID, maxHumanUID].
 const (
 	minHumanUID = 501
 	maxHumanUID = 60000
@@ -175,9 +177,12 @@ func GetSystemConfig(cmder utils.CmdRunner) (*SystemConfig, error) {
 
 	if out, err := cmder.RunCmd(bioutilPath, "-r", "-s"); err == nil {
 		if fields, ok := parseBioutil(out); ok {
-			if _, present := fields["Biometrics functionality"]; present {
-				cfg.Compatible = "1"
-			}
+			// Derive compatible from the field VALUE, not merely its presence:
+			// if bioutil ever emits "Biometrics functionality: 0" we must report
+			// touchid_compatible=0, not 1. (Note: this column is "1" on every
+			// Apple Silicon Mac regardless — use touchid_builtin /
+			// touchid_sensor_present to detect an actual fingerprint sensor.)
+			cfg.Compatible = boolField(fields, "Biometrics functionality")
 			cfg.Enabled = boolField(fields, "Biometrics functionality")
 			cfg.Unlock = boolField(fields, "Biometrics for unlock")
 		}
