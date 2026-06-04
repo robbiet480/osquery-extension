@@ -221,7 +221,7 @@ func TestGetUserConfigs_AllAccounts(t *testing.T) {
 	}
 	exists := func(string) bool { return true }
 
-	configs, err := GetUserConfigs(runner, exists, nil, perUser)
+	configs, err := GetUserConfigs(runner, true, exists, nil, perUser)
 	require.NoError(t, err)
 	require.Len(t, configs, 3)
 
@@ -252,7 +252,7 @@ func TestGetUserConfigs_ConstraintAndZeroForcesEffective(t *testing.T) {
 	perUser := func(string) ([]byte, error) { return []byte(userBioutil), nil }
 	exists := func(string) bool { return true }
 
-	configs, err := GetUserConfigs(runner, exists, []string{"501"}, perUser)
+	configs, err := GetUserConfigs(runner, true, exists, []string{"501"}, perUser)
 	require.NoError(t, err)
 	require.Len(t, configs, 1)
 	c := configs[0]
@@ -275,7 +275,7 @@ func TestGetUserConfigs_CountUnknownPreservesEffective(t *testing.T) {
 	perUser := func(string) ([]byte, error) { return []byte(userBioutil), nil }
 	exists := func(string) bool { return true }
 
-	configs, err := GetUserConfigs(runner, exists, []string{"501"}, perUser)
+	configs, err := GetUserConfigs(runner, true, exists, []string{"501"}, perUser)
 	require.NoError(t, err)
 	require.Len(t, configs, 1)
 	c := configs[0]
@@ -293,9 +293,46 @@ func TestGetUserConfigs_SkipsNonexistentUID(t *testing.T) {
 	perUser := func(string) ([]byte, error) { return nil, errors.New("nope") }
 	exists := func(string) bool { return false }
 
-	configs, err := GetUserConfigs(runner, exists, []string{"99999"}, perUser)
+	configs, err := GetUserConfigs(runner, true, exists, []string{"99999"}, perUser)
 	require.NoError(t, err)
 	assert.Empty(t, configs)
+}
+
+func TestGetUserConfigs_NoSensorReturnsNoRows(t *testing.T) {
+	t.Parallel()
+	// A Mac with no usable Touch ID sensor (sensorPresent=false) must not emit
+	// any per-user rows, even though dscl can still enumerate local accounts and
+	// bioutil -c -s succeeds. User enumeration is independent of the hardware, so
+	// without this gate the table would report a row per account on a sensor-less
+	// Mac. This is handled in code (not punted to callers via touchid_sensor_present).
+	runner := utils.MultiMockCmdRunner{
+		Commands: map[string]utils.MockCmdRunner{
+			"/usr/bin/bioutil -c -s":                {Output: allCounts},
+			"/usr/bin/dscl . -list /Users UniqueID": {Output: "alice 501\nbob 503\n"},
+		},
+	}
+	perUser := func(string) ([]byte, error) { return []byte(userBioutil), nil }
+	exists := func(string) bool { return true }
+
+	configs, err := GetUserConfigs(runner, false, exists, nil, perUser)
+	require.NoError(t, err)
+	assert.Empty(t, configs, "no rows when the Mac has no usable Touch ID sensor")
+}
+
+func TestGetUserConfigs_NoSensorWithConstraintReturnsNoRows(t *testing.T) {
+	t.Parallel()
+	// Even an explicit WHERE uid = constraint yields no rows on a sensor-less Mac.
+	runner := utils.MultiMockCmdRunner{
+		Commands: map[string]utils.MockCmdRunner{
+			"/usr/bin/bioutil -c -s": {Output: allCounts},
+		},
+	}
+	perUser := func(string) ([]byte, error) { return []byte(userBioutil), nil }
+	exists := func(string) bool { return true }
+
+	configs, err := GetUserConfigs(runner, false, exists, []string{"501"}, perUser)
+	require.NoError(t, err)
+	assert.Empty(t, configs, "no rows even with a uid constraint when no sensor is present")
 }
 
 func TestUserConfigsToRows_OmitsUnknownColumns(t *testing.T) {

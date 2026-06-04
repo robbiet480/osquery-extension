@@ -145,6 +145,33 @@ func ioregClassPresent(cmder utils.CmdRunner, class string) (bool, error) {
 	return len(nodes) > 0, nil
 }
 
+// SensorPresent reports whether the Mac has a usable Touch ID fingerprint
+// sensor: a built-in one (laptops register an AppleBiometricSensor node) OR an
+// attached external one (a Magic Keyboard with Touch ID registers an
+// AppleMesaAccessory node instead). This is the authoritative "can this Mac
+// actually use Touch ID" signal — bioutil's compatibility/enabled flags are "1"
+// on every Apple Silicon Mac (the Secure Enclave is on-die) even on a
+// keyboard-less Mac mini/Studio with no sensor at all. Both touchid_system_config
+// and touchid_user_config gate on this so a sensor-less Mac is handled
+// consistently. The accessory half is a live signal: a disconnected Touch ID
+// keyboard reads as absent until it reconnects.
+func SensorPresent(cmder utils.CmdRunner) (bool, error) {
+	builtin, err := ioregClassPresent(cmder, "AppleBiometricSensor")
+	if err != nil {
+		return false, err
+	}
+	if builtin {
+		return true, nil
+	}
+	// No built-in sensor — check for an attached external Touch ID accessory.
+	// AppleMesaAccessory is a capability class, not a product-string match, so it
+	// is name-, transport- (USB or Bluetooth) and localization-independent, and a
+	// non-Touch-ID keyboard correctly reads as no sensor. The sibling classes
+	// AppleMesaSEPDriver / AppleMesaResources are NOT usable here — they are SEP
+	// scaffolding present on every Apple Silicon Mac.
+	return ioregClassPresent(cmder, "AppleMesaAccessory")
+}
+
 // SystemConfig holds the machine-wide Touch ID posture for one host.
 type SystemConfig struct {
 	Compatible    string // touchid_compatible: bioutil reports Secure Enclave biometric support
@@ -199,21 +226,12 @@ func GetSystemConfig(cmder utils.CmdRunner) (*SystemConfig, error) {
 	}
 	cfg.Builtin = boolValue(builtin)
 
-	// Any usable sensor: built-in OR an attached external Touch ID sensor (e.g.
-	// a Magic Keyboard with Touch ID), which registers no AppleBiometricSensor
-	// node but does register an AppleMesaAccessory node ("Mesa" is Apple's
-	// codename for the Touch ID sensor subsystem; the "Accessory" suffix denotes
-	// an external sensor). This is a capability class, not a product-string
-	// match, so a non-Touch-ID keyboard correctly reads as no sensor. The
-	// sibling classes AppleMesaSEPDriver / AppleMesaResources are NOT usable for
-	// this — they are SEP scaffolding present on every Apple Silicon Mac.
-	sensorPresent := builtin
-	if !sensorPresent {
-		mesa, err := ioregClassPresent(cmder, "AppleMesaAccessory")
-		if err != nil {
-			return nil, err
-		}
-		sensorPresent = mesa
+	// Any usable sensor (built-in OR an attached Touch ID accessory) via the
+	// shared SensorPresent helper, so touchid_system_config and touchid_user_config
+	// agree on what "has a sensor" means.
+	sensorPresent, err := SensorPresent(cmder)
+	if err != nil {
+		return nil, err
 	}
 	cfg.SensorPresent = boolValue(sensorPresent)
 
@@ -336,15 +354,28 @@ type UserConfig struct {
 //     be read the flag columns are left empty (unknown) rather than "0", so an
 //     enabled-but-logged-out user is not misreported as disabled.
 //
+// sensorPresent gates the whole table: a Mac with no usable Touch ID sensor
+// emits no rows at all. User enumeration (dscl) is independent of the hardware,
+// so without this gate a keyboard-less Mac mini/Studio would report a row per
+// local account with every Touch ID column NULL — noise that callers would have
+// to filter on touchid_system_config.touchid_sensor_present themselves. Handling
+// it here keeps that knowledge in one place.
+//
 // targetUIDs, when non-empty, restricts the rows (from a `WHERE uid =`
 // constraint); otherwise every real local account is reported. perUserRunner
 // runs `bioutil -r` as a given uid; it is injected for testability.
 func GetUserConfigs(
 	cmder utils.CmdRunner,
+	sensorPresent bool,
 	exists uidExists,
 	targetUIDs []string,
 	perUserRunner func(uid string) ([]byte, error),
 ) ([]*UserConfig, error) {
+	// No usable Touch ID sensor => no per-user Touch ID configuration to report.
+	if !sensorPresent {
+		return nil, nil
+	}
+
 	counts := map[string]int{}
 	countsKnown := false
 	if out, err := cmder.RunCmd(bioutilPath, "-c", "-s"); err == nil {
@@ -444,7 +475,17 @@ func defaultPerUserRunner(cmder utils.CmdRunner) func(uid string) ([]byte, error
 // touchid_user_config.
 func TouchIDUserConfigGenerate(ctx context.Context, queryContext table.QueryContext) ([]map[string]string, error) {
 	runner := utils.NewRunner().Runner
-	configs, err := GetUserConfigs(runner, defaultUIDExists, uidConstraints(queryContext), defaultPerUserRunner(runner))
+
+	// A Mac with no usable Touch ID sensor has no per-user Touch ID config to
+	// report, so the table yields no rows (rather than a NULL-filled row per
+	// local account). touchid_system_config.touchid_sensor_present exposes the
+	// same signal for queries that want it explicitly.
+	sensorPresent, err := SensorPresent(runner)
+	if err != nil {
+		return nil, err
+	}
+
+	configs, err := GetUserConfigs(runner, sensorPresent, defaultUIDExists, uidConstraints(queryContext), defaultPerUserRunner(runner))
 	if err != nil {
 		return nil, err
 	}
