@@ -10,6 +10,7 @@ import (
 	"github.com/macadmins/osquery-extension/tables/alt_system_info"
 	"github.com/macadmins/osquery-extension/tables/chromeuserprofiles"
 	"github.com/macadmins/osquery-extension/tables/crowdstrike_falcon"
+	"github.com/macadmins/osquery-extension/tables/eapolstatus"
 	"github.com/macadmins/osquery-extension/tables/energyimpact"
 	"github.com/macadmins/osquery-extension/tables/fileline"
 	"github.com/macadmins/osquery-extension/tables/filevaultusers"
@@ -95,6 +96,7 @@ func main() {
 
 	if runtime.GOOS == "darwin" {
 		darwinPlugins := []osquery.OsqueryPlugin{
+			table.NewPlugin("eapol_status", eapolstatus.EAPOLStatusColumns(), eapolstatus.EAPOLStatusGenerate),
 			table.NewPlugin("energy_impact", energyimpact.EnergyImpactColumns(), energyimpact.EnergyImpactGenerate),
 			table.NewPlugin("filevault_users", filevaultusers.FileVaultUsersColumns(), filevaultusers.FileVaultUsersGenerate),
 			table.NewPlugin("local_network_permissions", localnetworkpermissions.LocalNetworkPermissionsColumns(), localnetworkpermissions.LocalNetworkPermissionsGenerate),

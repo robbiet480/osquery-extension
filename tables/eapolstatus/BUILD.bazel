@@ -1,0 +1,44 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "eapolstatus",
+    srcs = [
+        "eapolstatus.go",
+        "eapol_darwin.go",
+        "eapol_other.go",
+    ],
+    # cgo is only needed on darwin: eapol_darwin.go (//go:build darwin) calls
+    # EAP8021X.framework (via dlopen/dlsym) + CoreFoundation via cgo.
+    # The darwin build constraint does NOT include ios, so only darwin gets
+    # the cgo + framework links; linux/windows stay pure Go.
+    cgo = select({
+        "@io_bazel_rules_go//go/platform:darwin": True,
+        "//conditions:default": False,
+    }),
+    clinkopts = select({
+        "@io_bazel_rules_go//go/platform:darwin": [
+            "-framework",
+            "CoreFoundation",
+        ],
+        "//conditions:default": [],
+    }),
+    importpath = "github.com/macadmins/osquery-extension/tables/eapolstatus",
+    visibility = ["//visibility:public"],
+    deps = [
+        "@com_github_osquery_osquery_go//plugin/table",
+    ],
+)
+
+go_test(
+    name = "eapolstatus_test",
+    srcs = [
+        "eapolstatus_test.go",
+        "eapol_darwin_test.go",
+    ],
+    embed = [":eapolstatus"],
+    deps = [
+        "@com_github_osquery_osquery_go//plugin/table",
+        "@com_github_stretchr_testify//assert",
+        "@com_github_stretchr_testify//require",
+    ],
+)
