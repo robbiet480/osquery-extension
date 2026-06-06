@@ -13,11 +13,19 @@ APP_NAME="macadmins_extension"
 # (or an unexpected multi-file output) are handled safely rather than being
 # silently word-split.
 copy_bazel_output() {
-	local target="$1" dest="$2" file count
-	file="$(bazel cquery --output=files "$target" 2>/dev/null)"
-	count="$(printf '%s' "$file" | grep -c .)"
-	if [ "$count" -ne 1 ]; then
-		echo "error: expected exactly one output file for ${target}, got ${count}:" >&2
+	local target="$1" dest="$2" file lines
+	# `|| true` keeps a failed/empty cquery from tripping `set -e` before the
+	# emptiness check below can emit a clear error.
+	file="$(bazel cquery --output=files "$target" 2>/dev/null || true)"
+	if [ -z "$file" ]; then
+		echo "error: no output file for ${target}" >&2
+		return 1
+	fi
+	# Reject multi-path output (one path per line). wc -l is used instead of
+	# `grep -c`, which exits non-zero on zero matches and would trip `set -e`.
+	lines="$(printf '%s\n' "$file" | wc -l | tr -d '[:space:]')"
+	if [ "$lines" -ne 1 ]; then
+		echo "error: expected exactly one output file for ${target}, got ${lines}:" >&2
 		printf '%s\n' "$file" >&2
 		return 1
 	fi

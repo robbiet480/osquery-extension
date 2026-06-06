@@ -14,7 +14,7 @@ func newBackend() Dot1XBackend {
 type noopBackend struct{}
 
 func (noopBackend) GetStatus(ifname string) (Dot1XStatus, error) {
-	return Dot1XStatus{Interface: ifname}, fmt.Errorf("%w: EAP8021X framework not available on this platform", ErrBackendUnavailable)
+	return Dot1XStatus{Interface: ifname}, fmt.Errorf("%w: not supported on this platform", ErrBackendUnavailable)
 }
 
 func defaultInterfaces() []string {

@@ -47,9 +47,11 @@ type Dot1XBackend interface {
 	GetStatus(ifname string) (Dot1XStatus, error)
 }
 
-// ErrBackendUnavailable is returned by GetStatus when the EAP8021X
-// framework cannot be loaded (a systemic failure, not per-interface).
-var ErrBackendUnavailable = errors.New("EAP8021X.framework unavailable")
+// ErrBackendUnavailable is returned by GetStatus when a platform's 802.1X
+// backend cannot be initialized (e.g. EAP8021X.framework on macOS or
+// wlanapi.dll on Windows) — a systemic failure, not a per-interface one.
+// Each backend wraps it with platform-specific detail.
+var ErrBackendUnavailable = errors.New("802.1X backend unavailable")
 
 // stateNames maps EAPOLControlState to human-readable strings.
 var stateNames = map[int]string{
