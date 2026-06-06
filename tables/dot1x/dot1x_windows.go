@@ -1,6 +1,6 @@
 //go:build windows
 
-package eapolstatus
+package dot1x
 
 import (
 	"fmt"
@@ -16,14 +16,14 @@ const (
 
 	wlanIntfOpcodeCurrentConnection uint32 = 7
 
-	wlanIfaceStateNotReady         uint32 = 0
-	wlanIfaceStateConnected        uint32 = 1
-	wlanIfaceStateAdHocFormed      uint32 = 2
-	wlanIfaceStateDisconnecting    uint32 = 3
-	wlanIfaceStateDisconnected     uint32 = 4
-	wlanIfaceStateAssociating      uint32 = 5
-	wlanIfaceStateDiscovering      uint32 = 6
-	wlanIfaceStateAuthenticating   uint32 = 7
+	wlanIfaceStateNotReady       uint32 = 0
+	wlanIfaceStateConnected      uint32 = 1
+	wlanIfaceStateAdHocFormed    uint32 = 2
+	wlanIfaceStateDisconnecting  uint32 = 3
+	wlanIfaceStateDisconnected   uint32 = 4
+	wlanIfaceStateAssociating    uint32 = 5
+	wlanIfaceStateDiscovering    uint32 = 6
+	wlanIfaceStateAuthenticating uint32 = 7
 )
 
 type windowsGUID struct {
@@ -69,10 +69,10 @@ type wlanAssociationAttributes struct {
 }
 
 type wlanSecurityAttributes struct {
-	SecurityEnabled  int32
-	OneXEnabled      int32
-	AuthAlgorithm    uint32
-	CipherAlgorithm  uint32
+	SecurityEnabled int32
+	OneXEnabled     int32
+	AuthAlgorithm   uint32
+	CipherAlgorithm uint32
 }
 
 type wlanConnectionAttributes struct {
@@ -117,7 +117,7 @@ func initWlan() {
 
 type windowsBackend struct{}
 
-func newBackend() EAPOLBackend {
+func newBackend() Dot1XBackend {
 	wlanOnce.Do(initWlan)
 	if !wlanAvail {
 		return unavailableBackend{}
@@ -127,8 +127,8 @@ func newBackend() EAPOLBackend {
 
 type unavailableBackend struct{}
 
-func (unavailableBackend) GetStatus(ifname string) (EAPOLStatus, error) {
-	return EAPOLStatus{Interface: ifname},
+func (unavailableBackend) GetStatus(ifname string) (Dot1XStatus, error) {
+	return Dot1XStatus{Interface: ifname},
 		fmt.Errorf("%w: wlanapi.dll not available on this system", ErrBackendUnavailable)
 }
 
@@ -197,20 +197,20 @@ func defaultInterfaces() []string {
 	return ifaces
 }
 
-func (windowsBackend) GetStatus(ifname string) (EAPOLStatus, error) {
+func (windowsBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 	handle, err := openWlanHandle()
 	if err != nil {
-		return EAPOLStatus{Interface: ifname},
+		return Dot1XStatus{Interface: ifname},
 			fmt.Errorf("%w: %v", ErrBackendUnavailable, err)
 	}
 	defer closeWlanHandle(handle)
 
 	guid, ifState, err := findWlanInterface(handle, ifname)
 	if err != nil {
-		return EAPOLStatus{Interface: ifname}, err
+		return Dot1XStatus{Interface: ifname}, err
 	}
 
-	s := EAPOLStatus{
+	s := Dot1XStatus{
 		Interface:        ifname,
 		UniqueIdentifier: guid.String(),
 	}

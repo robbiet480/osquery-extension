@@ -1,4 +1,4 @@
-package eapolstatus
+package dot1x
 
 import (
 	"context"
@@ -14,21 +14,23 @@ import (
 	"github.com/osquery/osquery-go/plugin/table"
 )
 
-// EAPOLStatus holds the EAPOL state and status for a single interface.
-type EAPOLStatus struct {
-	Interface               string
-	State                   int    // EAPOLControlState: 0=Idle,1=Starting,2=Running,3=Stopping
-	SupplicantState         int    // 802.1X supplicant state machine value
-	EAPType                 int    // EAP method code (e.g. 13=TLS)
-	EAPTypeName             string // human-readable EAP method (e.g. "EAP-TLS")
-	ClientStatus            int    // 0=ok, nonzero=error code
-	DomainSpecificError     int
-	AuthenticatorMACAddress string // colon-separated
-	Mode                    int    // 0=None,1=User,2=LoginWindow,3=System
-	TLSSessionWasResumed        bool
-	TLSServerCertificateChain   string // pipe-separated subject DNs in LDAP notation
-	TLSServerCertificateSHA1    string // comma-separated colon-separated SHA-1 fingerprints
-	TLSServerCertificateSerials string // comma-separated hex serial numbers
+// Dot1XStatus holds the 802.1X supplicant state and status for a single
+// interface. On macOS the values come from the EAPOL (EAP over LAN) layer of
+// the EAP8021X framework; on Windows they come from the WLAN/OneX APIs.
+type Dot1XStatus struct {
+	Interface                    string
+	State                        int    // EAPOLControlState: 0=Idle,1=Starting,2=Running,3=Stopping
+	SupplicantState              int    // 802.1X supplicant state machine value
+	EAPType                      int    // EAP method code (e.g. 13=TLS)
+	EAPTypeName                  string // human-readable EAP method (e.g. "EAP-TLS")
+	ClientStatus                 int    // 0=ok, nonzero=error code
+	DomainSpecificError          int
+	AuthenticatorMACAddress      string // colon-separated
+	Mode                         int    // 0=None,1=User,2=LoginWindow,3=System
+	TLSSessionWasResumed         bool
+	TLSServerCertificateChain    string // pipe-separated subject DNs in LDAP notation
+	TLSServerCertificateSHA1     string // comma-separated colon-separated SHA-1 fingerprints
+	TLSServerCertificateSerials  string // comma-separated hex serial numbers
 	TLSTrustClientStatus         int    // trust evaluation error code (0=ok)
 	TLSNegotiatedProtocolVersion string // "1.2" or "1.3"
 	TLSNegotiatedCipher          int    // TLS cipher suite code
@@ -38,11 +40,11 @@ type EAPOLStatus struct {
 	UniqueIdentifier             string
 }
 
-// EAPOLBackend fetches EAPOL status for a named interface.
+// Dot1XBackend fetches 802.1X status for a named interface.
 // Production implementation calls EAPOLControlCopyStateAndStatus
-// via cgo (eapol_darwin.go); tests inject a fake.
-type EAPOLBackend interface {
-	GetStatus(ifname string) (EAPOLStatus, error)
+// via cgo (dot1x_darwin.go); tests inject a fake.
+type Dot1XBackend interface {
+	GetStatus(ifname string) (Dot1XStatus, error)
 }
 
 // ErrBackendUnavailable is returned by GetStatus when the EAP8021X
@@ -99,8 +101,8 @@ var modeNames = map[int]string{
 	3: "System",
 }
 
-// EAPOLStatusColumns returns the column definitions.
-func EAPOLStatusColumns() []table.ColumnDefinition {
+// Dot1XStatusColumns returns the column definitions.
+func Dot1XStatusColumns() []table.ColumnDefinition {
 	return []table.ColumnDefinition{
 		table.TextColumn("interface"),
 		table.IntegerColumn("state"),
@@ -128,8 +130,8 @@ func EAPOLStatusColumns() []table.ColumnDefinition {
 	}
 }
 
-// EAPOLStatusGenerate generates table rows by querying each interface.
-func EAPOLStatusGenerate(ctx context.Context, queryContext table.QueryContext) ([]map[string]string, error) {
+// Dot1XStatusGenerate generates table rows by querying each interface.
+func Dot1XStatusGenerate(ctx context.Context, queryContext table.QueryContext) ([]map[string]string, error) {
 	return generateRows(ctx, newBackend(), queryContext)
 }
 
@@ -137,7 +139,7 @@ func EAPOLStatusGenerate(ctx context.Context, queryContext table.QueryContext) (
 // constraint "interface" is provided, only that interface is queried;
 // otherwise en0 through en9 are probed. The context is checked before each
 // backend call to support cancellation.
-func generateRows(ctx context.Context, backend EAPOLBackend, queryContext table.QueryContext) ([]map[string]string, error) {
+func generateRows(ctx context.Context, backend Dot1XBackend, queryContext table.QueryContext) ([]map[string]string, error) {
 	ifaces := interfacesToQuery(queryContext)
 	var rows []map[string]string
 
@@ -190,30 +192,30 @@ func interfacesToQuery(queryContext table.QueryContext) []string {
 	return fallback
 }
 
-func rowFromStatus(s EAPOLStatus) map[string]string {
+func rowFromStatus(s Dot1XStatus) map[string]string {
 	row := map[string]string{
-		"interface":             s.Interface,
-		"state":                 itoa(s.State),
-		"state_name":            lookupName(stateNames, s.State),
-		"supplicant_state":      itoa(s.SupplicantState),
-		"supplicant_state_name": lookupName(supplicantStateNames, s.SupplicantState),
-		"eap_type":              itoa(s.EAPType),
-		"eap_type_name":         "",
-		"client_status":         itoa(s.ClientStatus),
-		"domain_specific_error": itoa(s.DomainSpecificError),
-		"authenticator_mac_address": s.AuthenticatorMACAddress,
-		"mode":   itoa(s.Mode),
-		"mode_name": lookupName(modeNames, s.Mode),
-		"tls_server_certificate_chain":   s.TLSServerCertificateChain,
-		"tls_server_certificate_sha1":    s.TLSServerCertificateSHA1,
-		"tls_server_certificate_serials": s.TLSServerCertificateSerials,
-		"tls_trust_client_status":        itoa(s.TLSTrustClientStatus),
+		"interface":                       s.Interface,
+		"state":                           itoa(s.State),
+		"state_name":                      lookupName(stateNames, s.State),
+		"supplicant_state":                itoa(s.SupplicantState),
+		"supplicant_state_name":           lookupName(supplicantStateNames, s.SupplicantState),
+		"eap_type":                        itoa(s.EAPType),
+		"eap_type_name":                   "",
+		"client_status":                   itoa(s.ClientStatus),
+		"domain_specific_error":           itoa(s.DomainSpecificError),
+		"authenticator_mac_address":       s.AuthenticatorMACAddress,
+		"mode":                            itoa(s.Mode),
+		"mode_name":                       lookupName(modeNames, s.Mode),
+		"tls_server_certificate_chain":    s.TLSServerCertificateChain,
+		"tls_server_certificate_sha1":     s.TLSServerCertificateSHA1,
+		"tls_server_certificate_serials":  s.TLSServerCertificateSerials,
+		"tls_trust_client_status":         itoa(s.TLSTrustClientStatus),
 		"tls_negotiated_protocol_version": s.TLSNegotiatedProtocolVersion,
 		"tls_negotiated_cipher":           itoa(s.TLSNegotiatedCipher),
 		"inner_eap_type":                  itoa(s.InnerEAPType),
 		"inner_eap_type_name":             "",
 		"last_status_timestamp":           s.LastStatusTimestamp,
-		"unique_identifier": s.UniqueIdentifier,
+		"unique_identifier":               s.UniqueIdentifier,
 	}
 	if s.TLSSessionWasResumed {
 		row["tls_session_was_resumed"] = "1"

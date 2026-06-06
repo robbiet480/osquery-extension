@@ -1,6 +1,6 @@
 //go:build darwin
 
-package eapolstatus
+package dot1x
 
 /*
 #include <CoreFoundation/CoreFoundation.h>
@@ -21,7 +21,7 @@ typedef int (*EAPOLControlCopyStateAndStatusFn)(const char*, uint32_t*, CFDictio
 
 static EAPOLControlCopyStateAndStatusFn copy_state_fn = NULL;
 
-static int load_eapol(void) {
+static int load_dot1x(void) {
 	if (copy_state_fn) return 1;
 	// Handle intentionally held for process lifetime (sync.Once); the
 	// framework must stay loaded for copy_state_fn to remain valid.
@@ -173,10 +173,10 @@ static uint8_t* pack_cert_chain(CFArrayRef certs, CFIndex* out_len) {
 	return buf;
 }
 
-// eapol_query calls EAPOLControlCopyStateAndStatus for the given interface
+// dot1x_query calls EAPOLControlCopyStateAndStatus for the given interface
 // and fills the provided Go-accessible fields. Returns 0 on success.
 // All string/buffer outputs are malloc'd and must be freed by the caller.
-int eapol_query(
+int dot1x_query(
 	const char* ifname,
 	int* out_state,
 	int* out_supplicant_state,
@@ -310,38 +310,38 @@ type productionBackend struct{}
 
 var loadOnce sync.Once
 
-func newBackend() EAPOLBackend {
-	loadOnce.Do(func() { C.load_eapol() })
+func newBackend() Dot1XBackend {
+	loadOnce.Do(func() { C.load_dot1x() })
 	return productionBackend{}
 }
 
-func (productionBackend) GetStatus(ifname string) (EAPOLStatus, error) {
+func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 	cName := C.CString(ifname)
 	defer C.free(unsafe.Pointer(cName))
 
 	var (
-		cState             C.int
-		cSupplicantState   C.int
-		cEAPType           C.int
-		cEAPTypeName       *C.char
-		cClientStatus      C.int
-		cDomainError       C.int
-		cAuthMAC           *C.uint8_t
-		cAuthMACLen        C.CFIndex
-		cMode              C.int
-		cTLSResumed        C.int
-		cCertChainData     *C.uint8_t
-		cCertChainLen      C.CFIndex
-		cTLSTrustStatus    C.int
-		cTLSCipher         C.int
-		cTLSProtoVersion   *C.char
-		cInnerEAPType      C.int
-		cInnerEAPTypeName  *C.char
-		cLastTimestamp     *C.char
-		cUniqueID          *C.char
+		cState            C.int
+		cSupplicantState  C.int
+		cEAPType          C.int
+		cEAPTypeName      *C.char
+		cClientStatus     C.int
+		cDomainError      C.int
+		cAuthMAC          *C.uint8_t
+		cAuthMACLen       C.CFIndex
+		cMode             C.int
+		cTLSResumed       C.int
+		cCertChainData    *C.uint8_t
+		cCertChainLen     C.CFIndex
+		cTLSTrustStatus   C.int
+		cTLSCipher        C.int
+		cTLSProtoVersion  *C.char
+		cInnerEAPType     C.int
+		cInnerEAPTypeName *C.char
+		cLastTimestamp    *C.char
+		cUniqueID         *C.char
 	)
 
-	ret := C.eapol_query(
+	ret := C.dot1x_query(
 		cName,
 		&cState,
 		&cSupplicantState,
@@ -364,14 +364,14 @@ func (productionBackend) GetStatus(ifname string) (EAPOLStatus, error) {
 		&cUniqueID,
 	)
 
-	s := EAPOLStatus{
-		Interface:           ifname,
-		State:               int(cState),
-		SupplicantState:     int(cSupplicantState),
-		EAPType:             int(cEAPType),
-		ClientStatus:        int(cClientStatus),
-		DomainSpecificError: int(cDomainError),
-		Mode:                int(cMode),
+	s := Dot1XStatus{
+		Interface:            ifname,
+		State:                int(cState),
+		SupplicantState:      int(cSupplicantState),
+		EAPType:              int(cEAPType),
+		ClientStatus:         int(cClientStatus),
+		DomainSpecificError:  int(cDomainError),
+		Mode:                 int(cMode),
 		TLSSessionWasResumed: cTLSResumed == 1,
 	}
 

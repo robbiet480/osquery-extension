@@ -1,14 +1,14 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 
 go_library(
-    name = "eapolstatus",
+    name = "dot1x",
     srcs = [
-        "eapolstatus.go",
-        "eapol_darwin.go",
-        "eapol_other.go",
-        "eapol_windows.go",
+        "dot1x.go",
+        "dot1x_darwin.go",
+        "dot1x_other.go",
+        "dot1x_windows.go",
     ],
-    # cgo is only needed on darwin: eapol_darwin.go (//go:build darwin) calls
+    # cgo is only needed on darwin: dot1x_darwin.go (//go:build darwin) calls
     # EAP8021X.framework (via dlopen/dlsym) + CoreFoundation via cgo.
     # The darwin build constraint does NOT include ios, so only darwin gets
     # the cgo + framework links; linux/windows stay pure Go.
@@ -23,7 +23,7 @@ go_library(
         ],
         "//conditions:default": [],
     }),
-    importpath = "github.com/macadmins/osquery-extension/tables/eapolstatus",
+    importpath = "github.com/macadmins/osquery-extension/tables/dot1x",
     visibility = ["//visibility:public"],
     deps = [
         "@com_github_osquery_osquery_go//plugin/table",
@@ -31,13 +31,13 @@ go_library(
 )
 
 go_test(
-    name = "eapolstatus_test",
+    name = "dot1x_test",
     srcs = [
-        "eapolstatus_test.go",
-        "eapol_darwin_test.go",
-        "eapol_windows_test.go",
+        "dot1x_test.go",
+        "dot1x_darwin_test.go",
+        "dot1x_windows_test.go",
     ],
-    embed = [":eapolstatus"],
+    embed = [":dot1x"],
     deps = [
         "@com_github_osquery_osquery_go//plugin/table",
         "@com_github_stretchr_testify//assert",

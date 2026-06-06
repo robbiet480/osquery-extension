@@ -1,6 +1,6 @@
 //go:build windows
 
-package eapolstatus
+package dot1x
 
 import (
 	"testing"
@@ -336,21 +336,21 @@ func TestUnavailableBackend(t *testing.T) {
 	assert.Equal(t, "wifi0", s.Interface)
 }
 
-// --- Mock-based integration tests using the shared EAPOLBackend interface ---
+// --- Mock-based integration tests using the shared Dot1XBackend interface ---
 
 func TestWindowsMockBackendConnected(t *testing.T) {
 	t.Parallel()
 
 	backend := fakeBackend{
-		statuses: map[string]EAPOLStatus{
+		statuses: map[string]Dot1XStatus{
 			"RZ616 Wi-Fi 6E 160MHz": {
-				Interface:               "RZ616 Wi-Fi 6E 160MHz",
-				State:                   2,
-				SupplicantState:         4,
-				EAPType:                 13,
-				ClientStatus:            0,
-				AuthenticatorMACAddress: "26:0b:8b:00:f2:34",
-				Mode:                    3,
+				Interface:                "RZ616 Wi-Fi 6E 160MHz",
+				State:                    2,
+				SupplicantState:          4,
+				EAPType:                  13,
+				ClientStatus:             0,
+				AuthenticatorMACAddress:  "26:0b:8b:00:f2:34",
+				Mode:                     3,
 				TLSServerCertificateSHA1: "23:a6:b1:0a:be:8a:4a:37:72:11:e2:f4:2c:36:67:f1:36:e9:08:bf",
 				UniqueIdentifier:         "{9A82D898-7B57-40AA-A330-E2B99D10BD77}",
 				DomainSpecificError:      -1,
@@ -391,15 +391,15 @@ func TestWindowsMockBackendDisconnected(t *testing.T) {
 	t.Parallel()
 
 	backend := fakeBackend{
-		statuses: map[string]EAPOLStatus{
+		statuses: map[string]Dot1XStatus{
 			"Intel Wi-Fi 6": {
-				Interface:           "Intel Wi-Fi 6",
-				State:               0,
-				SupplicantState:     0,
-				EAPType:             -1,
-				ClientStatus:        -1,
-				Mode:                -1,
-				DomainSpecificError: -1,
+				Interface:            "Intel Wi-Fi 6",
+				State:                0,
+				SupplicantState:      0,
+				EAPType:              -1,
+				ClientStatus:         -1,
+				Mode:                 -1,
+				DomainSpecificError:  -1,
 				TLSTrustClientStatus: -1,
 				TLSNegotiatedCipher:  -1,
 				InnerEAPType:         -1,
@@ -431,7 +431,7 @@ func TestWindowsMockBackendPEAP(t *testing.T) {
 	t.Parallel()
 
 	backend := fakeBackend{
-		statuses: map[string]EAPOLStatus{
+		statuses: map[string]Dot1XStatus{
 			"Realtek Wi-Fi": {
 				Interface:               "Realtek Wi-Fi",
 				State:                   2,
@@ -466,7 +466,7 @@ func TestWindowsMockBackendPEAP(t *testing.T) {
 func TestWindowsMockBackendNotFound(t *testing.T) {
 	t.Parallel()
 
-	backend := fakeBackend{statuses: map[string]EAPOLStatus{}}
+	backend := fakeBackend{statuses: map[string]Dot1XStatus{}}
 	qc := constraintFor("nonexistent adapter")
 	rows, err := generateRows(t.Context(), backend, qc)
 	require.NoError(t, err)

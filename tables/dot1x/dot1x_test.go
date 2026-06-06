@@ -1,4 +1,4 @@
-package eapolstatus
+package dot1x
 
 import (
 	"context"
@@ -22,20 +22,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// fakeBackend is a deterministic in-memory EAPOLBackend for tests.
+// fakeBackend is a deterministic in-memory Dot1XBackend for tests.
 type fakeBackend struct {
-	statuses map[string]EAPOLStatus
+	statuses map[string]Dot1XStatus
 }
 
-func (f fakeBackend) GetStatus(ifname string) (EAPOLStatus, error) {
+func (f fakeBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 	s, ok := f.statuses[ifname]
 	if ok {
 		return s, nil
 	}
-	return EAPOLStatus{Interface: ifname}, errors.New("not found")
+	return Dot1XStatus{Interface: ifname}, errors.New("not found")
 }
 
-func TestEAPOLStatusColumns(t *testing.T) {
+func TestDot1XStatusColumns(t *testing.T) {
 	t.Parallel()
 	want := []string{
 		"interface", "state", "state_name",
@@ -56,7 +56,7 @@ func TestEAPOLStatusColumns(t *testing.T) {
 		"last_status_timestamp",
 		"unique_identifier",
 	}
-	cols := EAPOLStatusColumns()
+	cols := Dot1XStatusColumns()
 	require.Len(t, cols, len(want))
 	for i, c := range cols {
 		assert.Equal(t, want[i], c.Name)
@@ -131,27 +131,27 @@ func TestInterfacesToQuery(t *testing.T) {
 func TestRowFromStatus(t *testing.T) {
 	t.Parallel()
 
-	s := EAPOLStatus{
-		Interface:               "en0",
-		State:                   2,
-		SupplicantState:         4,
-		EAPType:                 13,
-		EAPTypeName:             "EAP-TLS",
-		ClientStatus:            0,
-		DomainSpecificError:     0,
-		AuthenticatorMACAddress: "aa:bb:cc:dd:ee:ff",
-		Mode:                    1,
-		TLSSessionWasResumed:    true,
-		TLSServerCertificateChain:   "CN=radius.campus.edu,OU=IT,O=Campus,C=US",
-		TLSServerCertificateSHA1:    "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd",
-		TLSServerCertificateSerials: "7D3A1F9E2B5C",
-		TLSTrustClientStatus:        0,
+	s := Dot1XStatus{
+		Interface:                    "en0",
+		State:                        2,
+		SupplicantState:              4,
+		EAPType:                      13,
+		EAPTypeName:                  "EAP-TLS",
+		ClientStatus:                 0,
+		DomainSpecificError:          0,
+		AuthenticatorMACAddress:      "aa:bb:cc:dd:ee:ff",
+		Mode:                         1,
+		TLSSessionWasResumed:         true,
+		TLSServerCertificateChain:    "CN=radius.campus.edu,OU=IT,O=Campus,C=US",
+		TLSServerCertificateSHA1:     "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd",
+		TLSServerCertificateSerials:  "7D3A1F9E2B5C",
+		TLSTrustClientStatus:         0,
 		TLSNegotiatedProtocolVersion: "1.2",
 		TLSNegotiatedCipher:          0xC02B, // TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
-		InnerEAPType:                  26,
-		InnerEAPTypeName:              "MSCHAPv2",
-		LastStatusTimestamp:           "2026-06-05T12:00:00Z",
-		UniqueIdentifier:              "abc-123",
+		InnerEAPType:                 26,
+		InnerEAPTypeName:             "MSCHAPv2",
+		LastStatusTimestamp:          "2026-06-05T12:00:00Z",
+		UniqueIdentifier:             "abc-123",
 	}
 
 	row := rowFromStatus(s)
@@ -183,10 +183,10 @@ func TestRowFromStatus(t *testing.T) {
 func TestRowFromStatusUnsetFields(t *testing.T) {
 	t.Parallel()
 
-	s := EAPOLStatus{
-		Interface:           "en0",
-		State:               0,
-		SupplicantState:     8,
+	s := Dot1XStatus{
+		Interface:            "en0",
+		State:                0,
+		SupplicantState:      8,
 		TLSSessionWasResumed: false,
 	}
 
@@ -200,12 +200,12 @@ func TestRowFromStatusUnsetFields(t *testing.T) {
 func TestRowFromStatusUnknownEnumValues(t *testing.T) {
 	t.Parallel()
 
-	s := EAPOLStatus{
-		Interface:      "en0",
-		State:          99,
+	s := Dot1XStatus{
+		Interface:       "en0",
+		State:           99,
 		SupplicantState: 99,
-		Mode:           99,
-		EAPType:        0,
+		Mode:            99,
+		EAPType:         0,
 	}
 
 	row := rowFromStatus(s)
@@ -228,7 +228,7 @@ func TestGenerateRowsWithConstraint(t *testing.T) {
 	t.Parallel()
 
 	backend := fakeBackend{
-		statuses: map[string]EAPOLStatus{
+		statuses: map[string]Dot1XStatus{
 			"en0": {
 				Interface:       "en0",
 				State:           2,
@@ -261,7 +261,7 @@ func TestGenerateRowsWithConstraint(t *testing.T) {
 func TestGenerateRowsNoActiveInterface(t *testing.T) {
 	t.Parallel()
 
-	backend := fakeBackend{statuses: map[string]EAPOLStatus{}}
+	backend := fakeBackend{statuses: map[string]Dot1XStatus{}}
 	qc := table.QueryContext{
 		Constraints: map[string]table.ConstraintList{
 			"interface": {
@@ -282,7 +282,7 @@ func TestGenerateRowsSkipsErrors(t *testing.T) {
 
 	// en0 has a valid status, en1 errors — should return only en0
 	backend := fakeBackend{
-		statuses: map[string]EAPOLStatus{
+		statuses: map[string]Dot1XStatus{
 			"en0": {
 				Interface:       "en0",
 				State:           2,
@@ -328,8 +328,8 @@ type errBackend struct {
 	err error
 }
 
-func (e errBackend) GetStatus(ifname string) (EAPOLStatus, error) {
-	return EAPOLStatus{Interface: ifname}, e.err
+func (e errBackend) GetStatus(ifname string) (Dot1XStatus, error) {
+	return Dot1XStatus{Interface: ifname}, e.err
 }
 
 func TestMacAddrString(t *testing.T) {
@@ -337,15 +337,15 @@ func TestMacAddrString(t *testing.T) {
 
 	assert.Equal(t, "aa:bb:cc:dd:ee:ff",
 		macAddrString([]byte{0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff}))
-	assert.Equal(t, "", macAddrString([]byte{0xaa}))        // too short
+	assert.Equal(t, "", macAddrString([]byte{0xaa}))                // too short
 	assert.Equal(t, "", macAddrString([]byte{0, 1, 2, 3, 4, 5, 6})) // too long
 	assert.Equal(t, "", macAddrString(nil))
 }
 
-func TestEAPOLStatusGenerate(t *testing.T) {
+func TestDot1XStatusGenerate(t *testing.T) {
 	t.Parallel()
 
-	rows, err := generateRows(context.Background(), fakeBackend{statuses: map[string]EAPOLStatus{}}, table.QueryContext{
+	rows, err := generateRows(context.Background(), fakeBackend{statuses: map[string]Dot1XStatus{}}, table.QueryContext{
 		Constraints: map[string]table.ConstraintList{
 			"interface": {
 				Constraints: []table.Constraint{
@@ -409,12 +409,12 @@ func TestRowFromStatusEAPTypeNameFallback(t *testing.T) {
 	t.Parallel()
 
 	// When no explicit EAPTypeName is set, fall back to eapTypeNames map
-	s := EAPOLStatus{Interface: "en0", EAPType: 13}
+	s := Dot1XStatus{Interface: "en0", EAPType: 13}
 	row := rowFromStatus(s)
 	assert.Equal(t, "EAP-TLS", row["eap_type_name"])
 
 	// EAPTypeName set explicitly takes precedence
-	s2 := EAPOLStatus{Interface: "en0", EAPType: 13, EAPTypeName: "Custom-EAP"}
+	s2 := Dot1XStatus{Interface: "en0", EAPType: 13, EAPTypeName: "Custom-EAP"}
 	row2 := rowFromStatus(s2)
 	assert.Equal(t, "Custom-EAP", row2["eap_type_name"])
 }

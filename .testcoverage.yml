@@ -60,9 +60,9 @@ exclude:
     - tables/puppet/puppet_logs.go
     - tables/puppet/puppet_state.go
     - tables/puppet/yaml.go
-    - tables/eapolstatus/eapol_darwin.go
-    - tables/eapolstatus/eapol_windows.go
-    - tables/eapolstatus/eapol_other.go
+    - tables/dot1x/dot1x_darwin.go
+    - tables/dot1x/dot1x_windows.go
+    - tables/dot1x/dot1x_other.go
     # - \.pb\.go$ # excludes all protobuf generated files
     # - ^pkg/bar # exclude package `pkg/bar`
 

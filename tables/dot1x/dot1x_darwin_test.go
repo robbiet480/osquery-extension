@@ -1,6 +1,6 @@
 //go:build darwin
 
-package eapolstatus
+package dot1x
 
 import (
 	"testing"
@@ -15,7 +15,7 @@ func TestCgoFrameworkLoading(t *testing.T) {
 	backend := newBackend()
 
 	// Verify the framework loads and the symbol resolves.
-	// load_eapol() is called in newBackend via sync.Once, so the
+	// load_dot1x() is called in newBackend via sync.Once, so the
 	// framework is loaded before the first GetStatus call.
 	_, err := backend.GetStatus("en0")
 	// EAP8021X.framework should be loadable on any macOS system.
@@ -37,10 +37,10 @@ func TestCgoBogusInterface(t *testing.T) {
 	assert.Contains(t, err.Error(), "bogus999999")
 }
 
-// --- Mock-based integration tests using the shared EAPOLBackend interface ---
+// --- Mock-based integration tests using the shared Dot1XBackend interface ---
 //
 // These exercise the full generateRows -> rowFromStatus path with canned
-// EAPOLStatus values, so they run deterministically without the EAP8021X
+// Dot1XStatus values, so they run deterministically without the EAP8021X
 // framework or an active 802.1X session. They focus on the macOS-rich fields
 // (TLS server certificate chain, fingerprints, serials, negotiated protocol
 // version/cipher, trust status, and last-status timestamp) that the cgo
@@ -50,7 +50,7 @@ func TestDarwinMockBackendSystemEAPTLS(t *testing.T) {
 	t.Parallel()
 
 	backend := fakeBackend{
-		statuses: map[string]EAPOLStatus{
+		statuses: map[string]Dot1XStatus{
 			"en0": {
 				Interface:               "en0",
 				State:                   2, // Running
@@ -112,11 +112,11 @@ func TestDarwinMockBackendSystemEAPTLS(t *testing.T) {
 func TestDarwinMockBackendIdle(t *testing.T) {
 	t.Parallel()
 
-	// An interface with no active EAPOL session: state Idle, supplicant
+	// An interface with no active 802.1X session: state Idle, supplicant
 	// Disconnected, and all the optional numeric fields set to the cgo
 	// backend's -1 sentinel (which rowFromStatus renders as empty strings).
 	backend := fakeBackend{
-		statuses: map[string]EAPOLStatus{
+		statuses: map[string]Dot1XStatus{
 			"en0": {
 				Interface:            "en0",
 				State:                0, // Idle
@@ -158,7 +158,7 @@ func TestDarwinMockBackendPEAP(t *testing.T) {
 	// PEAP (25) tunneling MSCHAPv2 (26) on a LoginWindow-mode interface,
 	// negotiated over TLS 1.3 with a resumed session.
 	backend := fakeBackend{
-		statuses: map[string]EAPOLStatus{
+		statuses: map[string]Dot1XStatus{
 			"en1": {
 				Interface:                    "en1",
 				State:                        2, // Running
@@ -201,7 +201,7 @@ func TestDarwinMockBackendUnknownEAPType(t *testing.T) {
 	// A positive EAP type code missing from eapTypeNames should render as
 	// "Unknown(<n>)", consistent with state/supplicant/mode handling.
 	backend := fakeBackend{
-		statuses: map[string]EAPOLStatus{
+		statuses: map[string]Dot1XStatus{
 			"en0": {
 				Interface:       "en0",
 				State:           2,
@@ -225,7 +225,7 @@ func TestDarwinMockBackendMultipleInterfaces(t *testing.T) {
 
 	// Probing two interfaces where both are active yields one row each.
 	backend := fakeBackend{
-		statuses: map[string]EAPOLStatus{
+		statuses: map[string]Dot1XStatus{
 			"en0": {Interface: "en0", State: 2, SupplicantState: 4, EAPType: 13, EAPTypeName: "EAP-TLS", Mode: 3, InnerEAPType: -1},
 			"en1": {Interface: "en1", State: 2, SupplicantState: 4, EAPType: 25, InnerEAPType: 26, Mode: 1},
 		},
@@ -256,7 +256,7 @@ func TestDarwinMockBackendNotFound(t *testing.T) {
 
 	// An interface the backend doesn't know about errors per-interface, and
 	// generateRows skips it, yielding zero rows.
-	backend := fakeBackend{statuses: map[string]EAPOLStatus{}}
+	backend := fakeBackend{statuses: map[string]Dot1XStatus{}}
 	rows, err := generateRows(t.Context(), backend, constraintFor("en0"))
 	require.NoError(t, err)
 	assert.Empty(t, rows)
