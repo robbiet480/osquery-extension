@@ -50,7 +50,12 @@ update-repos:
 	bazel run //:gazelle-update-repos -- -from_file=go.mod
 
 test:
-	bazel test --test_output=errors $$(bazel query 'kind(go_test, //...)')
+	# Query only test targets (any *_test kind) rather than `bazel test //...`,
+	# which would also analyze the darwin cgo binary targets (pure="off",
+	# cgo=True) and fail on Linux CI where no darwin C++ toolchain exists.
+	# Matching all *_test kinds (not just go_test) keeps non-Go tests
+	# (sh_test, py_test, etc.) in scope if any are added later.
+	bazel test --test_output=errors $$(bazel query 'kind(".*_test", //...)')
 
 build: .pre-build
 ifeq ($(shell uname),Darwin)
