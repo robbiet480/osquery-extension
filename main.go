@@ -78,9 +78,12 @@ func main() {
 	}
 
 	// Platform specific tables
-	// if runtime.GOOS == "windows" {
-	// If there were windows only tables, they would go here
-	// }
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		eapolPlugins := []osquery.OsqueryPlugin{
+			table.NewPlugin("eapol_status", eapolstatus.EAPOLStatusColumns(), eapolstatus.EAPOLStatusGenerate),
+		}
+		plugins = append(plugins, eapolPlugins...)
+	}
 
 	if runtime.GOOS == "linux" || runtime.GOOS == "darwin" {
 		linuxPlugins := []osquery.OsqueryPlugin{
@@ -96,7 +99,6 @@ func main() {
 
 	if runtime.GOOS == "darwin" {
 		darwinPlugins := []osquery.OsqueryPlugin{
-			table.NewPlugin("eapol_status", eapolstatus.EAPOLStatusColumns(), eapolstatus.EAPOLStatusGenerate),
 			table.NewPlugin("energy_impact", energyimpact.EnergyImpactColumns(), energyimpact.EnergyImpactGenerate),
 			table.NewPlugin("filevault_users", filevaultusers.FileVaultUsersColumns(), filevaultusers.FileVaultUsersGenerate),
 			table.NewPlugin("local_network_permissions", localnetworkpermissions.LocalNetworkPermissionsColumns(), localnetworkpermissions.LocalNetworkPermissionsGenerate),

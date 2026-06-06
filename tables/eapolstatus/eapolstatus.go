@@ -160,7 +160,8 @@ func generateRows(ctx context.Context, backend EAPOLBackend, queryContext table.
 
 // interfacesToQuery returns the list of interfaces to query. If a WHERE
 // constraint "interface" is present, only that interface is returned;
-// otherwise en0 through en9 are enumerated.
+// otherwise the platform-specific default list is used (e.g. real
+// wireless adapter names on Windows, en0-en9 on macOS).
 func interfacesToQuery(queryContext table.QueryContext) []string {
 	if constraints, ok := queryContext.Constraints["interface"]; ok {
 		seen := make(map[string]struct{})
@@ -179,11 +180,14 @@ func interfacesToQuery(queryContext table.QueryContext) []string {
 		}
 	}
 
-	ifaces := make([]string, 0, 10)
-	for i := 0; i < 10; i++ {
-		ifaces = append(ifaces, "en"+strconv.Itoa(i))
+	if ifaces := defaultInterfaces(); len(ifaces) > 0 {
+		return ifaces
 	}
-	return ifaces
+	fallback := make([]string, 10)
+	for i := range fallback {
+		fallback[i] = "en" + strconv.Itoa(i)
+	}
+	return fallback
 }
 
 func rowFromStatus(s EAPOLStatus) map[string]string {

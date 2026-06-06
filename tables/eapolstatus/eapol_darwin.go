@@ -300,6 +300,7 @@ int eapol_query(
 import "C"
 import (
 	"fmt"
+	"strconv"
 	"sync"
 	"unsafe"
 )
@@ -433,4 +434,12 @@ func (productionBackend) GetStatus(ifname string) (EAPOLStatus, error) {
 	}
 
 	return s, nil
+}
+
+func defaultInterfaces() []string {
+	ifaces := make([]string, 0, 10)
+	for i := 0; i < 10; i++ {
+		ifaces = append(ifaces, "en"+strconv.Itoa(i))
+	}
+	return ifaces
 }

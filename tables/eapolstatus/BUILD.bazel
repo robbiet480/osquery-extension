@@ -6,6 +6,7 @@ go_library(
         "eapolstatus.go",
         "eapol_darwin.go",
         "eapol_other.go",
+        "eapol_windows.go",
     ],
     # cgo is only needed on darwin: eapol_darwin.go (//go:build darwin) calls
     # EAP8021X.framework (via dlopen/dlsym) + CoreFoundation via cgo.
