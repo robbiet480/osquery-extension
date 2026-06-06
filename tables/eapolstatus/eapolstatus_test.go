@@ -66,13 +66,18 @@ func TestEAPOLStatusColumns(t *testing.T) {
 func TestInterfacesToQuery(t *testing.T) {
 	t.Parallel()
 
-	t.Run("no constraint returns en0-en9", func(t *testing.T) {
+	t.Run("no constraint returns default interfaces", func(t *testing.T) {
 		t.Parallel()
 		qc := table.QueryContext{}
 		ifaces := interfacesToQuery(qc)
-		assert.Len(t, ifaces, 10)
-		assert.Equal(t, "en0", ifaces[0])
-		assert.Equal(t, "en9", ifaces[9])
+		assert.NotEmpty(t, ifaces)
+		if di := defaultInterfaces(); len(di) > 0 {
+			assert.Equal(t, di, ifaces)
+		} else {
+			assert.Len(t, ifaces, 10)
+			assert.Equal(t, "en0", ifaces[0])
+			assert.Equal(t, "en9", ifaces[9])
+		}
 	})
 
 	t.Run("with equals constraint returns specified interface", func(t *testing.T) {
@@ -90,7 +95,7 @@ func TestInterfacesToQuery(t *testing.T) {
 		assert.Equal(t, []string{"en0"}, ifaces)
 	})
 
-	t.Run("with LIKE constraint falls back to en0-en9", func(t *testing.T) {
+	t.Run("with LIKE constraint falls back to defaults", func(t *testing.T) {
 		t.Parallel()
 		qc := table.QueryContext{
 			Constraints: map[string]table.ConstraintList{
@@ -102,7 +107,7 @@ func TestInterfacesToQuery(t *testing.T) {
 			},
 		}
 		ifaces := interfacesToQuery(qc)
-		assert.Len(t, ifaces, 10)
+		assert.NotEmpty(t, ifaces)
 	})
 
 	t.Run("duplicate constraints deduplicated", func(t *testing.T) {
@@ -286,7 +291,16 @@ func TestGenerateRowsSkipsErrors(t *testing.T) {
 		},
 	}
 
-	qc := table.QueryContext{}
+	qc := table.QueryContext{
+		Constraints: map[string]table.ConstraintList{
+			"interface": {
+				Constraints: []table.Constraint{
+					{Operator: table.OperatorEquals, Expression: "en0"},
+					{Operator: table.OperatorEquals, Expression: "en1"},
+				},
+			},
+		},
+	}
 	rows, err := generateRows(context.Background(), backend, qc)
 	require.NoError(t, err)
 	assert.Len(t, rows, 1)

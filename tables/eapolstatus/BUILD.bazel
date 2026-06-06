@@ -35,6 +35,7 @@ go_test(
     srcs = [
         "eapolstatus_test.go",
         "eapol_darwin_test.go",
+        "eapol_windows_test.go",
     ],
     embed = [":eapolstatus"],
     deps = [
