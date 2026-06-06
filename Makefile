@@ -50,7 +50,7 @@ update-repos:
 	bazel run //:gazelle-update-repos -- -from_file=go.mod
 
 test:
-	bazel test --test_output=errors //...
+	bazel test --test_output=errors $$(bazel query 'kind(go_test, //...)')
 
 build: .pre-build
 ifeq ($(shell uname),Darwin)
