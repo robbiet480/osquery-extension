@@ -6,9 +6,11 @@ mkdir -p build/windows
 
 APP_NAME="macadmins_extension"
 
-cp $(bazel cquery --output=files //:osquery-extension-mac-amd 2>/dev/null) build/darwin/${APP_NAME}.amd64.ext
-
-cp $(bazel cquery --output=files //:osquery-extension-mac-arm 2>/dev/null) build/darwin/${APP_NAME}.arm64.ext
+# Mac binaries only build on macOS hosts (require Apple C++ toolchain + cgo).
+if [ "$(uname)" = "Darwin" ]; then
+	cp $(bazel cquery --output=files //:osquery-extension-mac-amd 2>/dev/null) build/darwin/${APP_NAME}.amd64.ext
+	cp $(bazel cquery --output=files //:osquery-extension-mac-arm 2>/dev/null) build/darwin/${APP_NAME}.arm64.ext
+fi
 
 cp $(bazel cquery --output=files //:osquery-extension-linux-amd 2>/dev/null) build/linux/${APP_NAME}.amd64.ext
 
