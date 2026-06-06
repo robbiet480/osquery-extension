@@ -53,8 +53,10 @@ test:
 	bazel test --test_output=errors //...
 
 build: .pre-build
+ifeq ($(shell uname),Darwin)
 	bazel build --verbose_failures //:osquery-extension-mac-amd
 	bazel build --verbose_failures //:osquery-extension-mac-arm
+endif
 	bazel build --verbose_failures //:osquery-extension-linux-amd
 	bazel build --verbose_failures //:osquery-extension-linux-arm
 	bazel build --verbose_failures //:osquery-extension-win-amd

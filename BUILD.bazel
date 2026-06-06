@@ -67,6 +67,8 @@ go_library(
 # toolchain on darwin. These are darwin-only binaries (goos = "darwin"),
 # so cgo=True does not affect Linux/Windows builds. The apple_support
 # toolchain in WORKSPACE satisfies the CC requirement on macOS.
+# Note: these targets require a darwin C++ toolchain, so they only build
+# on macOS hosts (the Makefile gates them behind `ifeq ($(shell uname),Darwin)`).
 go_binary(
     name = "osquery-extension-mac-arm",
     cgo = True,
