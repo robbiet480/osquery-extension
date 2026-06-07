@@ -254,6 +254,8 @@ func (windowsBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 			s.SupplicantState = 4 // Authenticated
 			s.ClientStatus = 0
 		}
+	} else {
+		s.SupplicantState = 0 // not an 802.1X network
 	}
 
 	profileName := utf16ToString(conn.ProfileName[:])
