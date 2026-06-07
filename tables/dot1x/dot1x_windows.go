@@ -232,6 +232,7 @@ func (windowsBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 
 	var dataSize uint32
 	var dataPtr unsafe.Pointer
+	var opcodeValueType uint32
 	ret, _, _ := procWlanQueryInterface.Call(
 		handle,
 		uintptr(unsafe.Pointer(guid)),
@@ -239,7 +240,7 @@ func (windowsBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 		0,
 		uintptr(unsafe.Pointer(&dataSize)),
 		uintptr(unsafe.Pointer(&dataPtr)),
-		0,
+		uintptr(unsafe.Pointer(&opcodeValueType)),
 	)
 	if ret != 0 || dataPtr == nil {
 		return s, nil
