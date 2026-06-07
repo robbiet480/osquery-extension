@@ -27,7 +27,12 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "@com_github_osquery_osquery_go//plugin/table",
-    ],
+    ] + select({
+        "@io_bazel_rules_go//go/platform:windows": [
+            "@org_golang_x_sys//windows",
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 go_test(

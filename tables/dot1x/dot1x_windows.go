@@ -9,6 +9,8 @@ import (
 	"sync"
 	"syscall"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 const (
@@ -142,7 +144,7 @@ func openWlanHandle() (uintptr, error) {
 		uintptr(unsafe.Pointer(&handle)),
 	)
 	if ret != 0 {
-		return 0, fmt.Errorf("WlanOpenHandle failed: %d", ret)
+		return 0, fmt.Errorf("WlanOpenHandle failed: %w", syscall.Errno(ret))
 	}
 	return handle, nil
 }
@@ -297,7 +299,7 @@ func getWlanProfileXML(handle uintptr, guid *windowsGUID, profileName string) (s
 		0,
 	)
 	if ret != 0 || xmlPtr == nil {
-		return "", fmt.Errorf("WlanGetProfile failed: %d", ret)
+		return "", fmt.Errorf("WlanGetProfile failed: %w", syscall.Errno(ret))
 	}
 	defer freeWlanMemory(uintptr(unsafe.Pointer(xmlPtr)))
 	return utf16PtrToString(xmlPtr), nil
@@ -442,21 +444,14 @@ func utf16PtrToString(p *uint16) string {
 	if p == nil {
 		return ""
 	}
-	const maxChars = 32768
-	s := unsafe.Slice(p, maxChars)
-	for i, v := range s {
-		if v == 0 {
-			return syscall.UTF16ToString(s[:i])
-		}
-	}
-	return syscall.UTF16ToString(s)
+	return windows.UTF16PtrToString(p)
 }
 
 func findWlanInterface(handle uintptr, name string) (*windowsGUID, uint32, error) {
 	var listPtr unsafe.Pointer
 	ret, _, _ := procWlanEnumInterfaces.Call(handle, 0, uintptr(unsafe.Pointer(&listPtr)))
 	if ret != 0 || listPtr == nil {
-		return nil, 0, fmt.Errorf("WlanEnumInterfaces failed: %d", ret)
+		return nil, 0, fmt.Errorf("WlanEnumInterfaces failed: %w", syscall.Errno(ret))
 	}
 	defer freeWlanMemory(uintptr(listPtr))
 

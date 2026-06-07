@@ -55,7 +55,7 @@ test:
 	# cgo=True) and fail on Linux CI where no darwin C++ toolchain exists.
 	# Matching all *_test kinds (not just go_test) keeps non-Go tests
 	# (sh_test, py_test, etc.) in scope if any are added later.
-	bazel test --test_output=errors $$(bazel query 'kind(".*_test", //...)')
+	bazel query 'kind(".*_test", //...)' | xargs bazel test --test_output=errors
 
 build: .pre-build
 ifeq ($(shell uname),Darwin)
