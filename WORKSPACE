@@ -3,7 +3,7 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 # --- Apple C/C++ toolchain for cgo on macOS -------------------------------
 # The dot1x table calls EAP8021X.framework (CoreFoundation) via cgo,
 # so the macOS go_binary targets are built with cgo enabled (see
-# BUILD.bazel: cgo = True, pure = "off"). That requires an Apple CC toolchain,
+# root BUILD.bazel go_binary targets: cgo = True, pure = "off"). That requires an Apple CC toolchain,
 # which apple_support provides. This block must precede rules_go so its CC
 # toolchain is registered for the Apple cc actions cgo uses.
 #
