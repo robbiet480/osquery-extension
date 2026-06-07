@@ -209,6 +209,11 @@ func TestExtractTrustedRootCAFromXML(t *testing.T) {
 			`<TrustedRootCA>   </TrustedRootCA>`,
 			"",
 		},
+		{
+			"newlines and tabs in hex (pretty-printed XML)",
+			"<TrustedRootCA>\n\t\t\t\t23 a6 b1 0a ff bb cc dd ee 11\n\t\t\t\t22 33 44 55 66 77 88 99 aa bb\n\t\t\t</TrustedRootCA>",
+			"23:a6:b1:0a:ff:bb:cc:dd:ee:11:22:33:44:55:66:77:88:99:aa:bb",
+		},
 	}
 
 	for _, tc := range tests {

@@ -412,7 +412,7 @@ func extractTrustedRootCAFromXML(xml string) string {
 		if end < 0 {
 			break
 		}
-		hex := strings.ReplaceAll(strings.TrimSpace(sub[:end]), " ", "")
+		hex := strings.Join(strings.Fields(strings.TrimSpace(sub[:end])), "")
 		if len(hex) == 40 {
 			hashes = append(hashes, formatSHA1Hex(hex))
 		}
