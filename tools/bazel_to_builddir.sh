@@ -45,9 +45,14 @@ copy_bazel_output() {
 		printf '%s\n' "$file" >&2
 		return 1
 	fi
-	# `--` guards against an output path that begins with `-` being parsed as
-	# a cp option.
-	cp -- "$file" "$dest"
+	# Guard against an output path that begins with `-` being parsed as a cp
+	# option by prefixing `./`. This is portable across GNU and BSD/macOS cp,
+	# whereas `--` end-of-options is not universally honored on BSD. dest is
+	# always a build/ path, so only the source needs guarding.
+	case "$file" in
+	-*) file="./$file" ;;
+	esac
+	cp "$file" "$dest"
 }
 
 # Mac binaries only build on macOS hosts (require Apple C++ toolchain + cgo).
