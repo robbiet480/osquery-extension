@@ -13,12 +13,22 @@ APP_NAME="macadmins_extension"
 # (or an unexpected multi-file output) are handled safely rather than being
 # silently word-split.
 copy_bazel_output() {
-	local target="$1" dest="$2" file lines
-	# `|| true` keeps a failed/empty cquery from tripping `set -e` before the
-	# emptiness check below can emit a clear error.
-	file="$(bazel cquery --output=files "$target" 2>/dev/null || true)"
+	local target="$1" dest="$2" file lines err rc
+	err="$(mktemp)"
+	# Capture stderr and the exit code so an actual bazel/cquery failure
+	# (missing bazel, bad workspace, query error) is reported distinctly from
+	# a successful-but-empty result. The `&& rc=0 || rc=$?` idiom records the
+	# exit code without tripping `set -e`.
+	file="$(bazel cquery --output=files "$target" 2>"$err")" && rc=0 || rc=$?
+	if [ "$rc" -ne 0 ]; then
+		echo "error: 'bazel cquery' failed for ${target} (exit ${rc}):" >&2
+		cat "$err" >&2
+		rm -f "$err"
+		return 1
+	fi
+	rm -f "$err"
 	if [ -z "$file" ]; then
-		echo "error: no output file for ${target}" >&2
+		echo "error: no output file for ${target} (target produced no outputs)" >&2
 		return 1
 	fi
 	# Reject multi-path output (one path per line). wc -l is used instead of
