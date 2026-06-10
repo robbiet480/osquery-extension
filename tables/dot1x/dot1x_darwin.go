@@ -132,12 +132,16 @@ static uint8_t* pack_cert_chain(CFArrayRef certs, CFIndex* out_len) {
 	CFIndex count = CFArrayGetCount(certs);
 	if (count == 0) return NULL;
 
-	// First pass: calculate total buffer size.
+	// First pass: calculate total buffer size. Apply the same oversized-entry
+	// skip the write pass uses below, so the allocation stays bounded and
+	// matches exactly what is written (no oversized malloc, no slack bytes).
 	CFIndex total = 0;
 	for (CFIndex i = 0; i < count; i++) {
 		CFTypeRef item = CFArrayGetValueAtIndex(certs, i);
 		if (!item || CFGetTypeID(item) != CFDataGetTypeID()) continue;
-		total += 4 + CFDataGetLength((CFDataRef)item);
+		CFIndex len = CFDataGetLength((CFDataRef)item);
+		if (len > 0xffffffff) continue; // exceeds 4-byte packed format
+		total += 4 + len;
 	}
 	if (total == 0) return NULL;
 

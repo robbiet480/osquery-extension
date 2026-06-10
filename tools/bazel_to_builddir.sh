@@ -13,8 +13,14 @@ APP_NAME="macadmins_extension"
 # (or an unexpected multi-file output) are handled safely rather than being
 # silently word-split.
 copy_bazel_output() {
+	if [ "$#" -ne 2 ]; then
+		echo "usage: copy_bazel_output TARGET DEST" >&2
+		return 2
+	fi
 	local target="$1" dest="$2" file lines err rc
-	err="$(mktemp)"
+	# Template form works on both GNU and BSD/macOS mktemp (a bare `mktemp`
+	# with no template is not portable to BSD).
+	err="$(mktemp "${TMPDIR:-/tmp}/bazel_to_builddir.XXXXXX")"
 	# Capture stderr and the exit code so an actual bazel/cquery failure
 	# (missing bazel, bad workspace, query error) is reported distinctly from
 	# a successful-but-empty result. The `&& rc=0 || rc=$?` idiom records the

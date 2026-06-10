@@ -198,12 +198,25 @@ func enumerateWlanInterfaceInfos(handle uintptr) (map[string]ifaceInfo, []string
 		offset := headerSize + uintptr(i)*itemSize
 		info := (*wlanInterfaceInfo)(unsafe.Pointer(uintptr(unsafe.Pointer(list)) + offset))
 		desc := utf16ToString(info.StrInterfaceDescription[:])
-		if _, dup := infos[desc]; !dup {
-			names = append(names, desc)
-		}
-		infos[desc] = ifaceInfo{guid: info.InterfaceGuid, state: info.IsState}
+		key := uniqueIfaceKey(infos, desc, info.InterfaceGuid)
+		infos[key] = ifaceInfo{guid: info.InterfaceGuid, state: info.IsState}
+		names = append(names, key)
 	}
 	return infos, names, nil
+}
+
+// uniqueIfaceKey returns desc, or a GUID-disambiguated key when desc already
+// exists in seen. Windows can report two adapters with identical interface
+// descriptions (e.g. two identical USB Wi-Fi dongles); without this the later
+// one would overwrite the earlier in the snapshot map, dropping it from
+// results and making it unqueryable. Suffixing the stable GUID keeps each
+// physical adapter individually enumerable and targetable via
+// WHERE interface = '...'.
+func uniqueIfaceKey(seen map[string]ifaceInfo, desc string, guid windowsGUID) string {
+	if _, dup := seen[desc]; !dup {
+		return desc
+	}
+	return desc + " " + guid.String()
 }
 
 // enumerateWlanInterfaces returns the descriptions of all wireless interfaces.

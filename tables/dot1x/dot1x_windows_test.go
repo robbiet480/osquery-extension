@@ -339,6 +339,31 @@ func TestUtf16PtrToString(t *testing.T) {
 	})
 }
 
+// --- duplicate interface description handling ---
+
+func TestUniqueIfaceKey(t *testing.T) {
+	t.Parallel()
+
+	g1 := windowsGUID{Data1: 0x11111111}
+	g2 := windowsGUID{Data1: 0x22222222}
+
+	infos := map[string]ifaceInfo{}
+
+	// First adapter keeps its plain description.
+	k1 := uniqueIfaceKey(infos, "Intel Wi-Fi 6", g1)
+	assert.Equal(t, "Intel Wi-Fi 6", k1)
+	infos[k1] = ifaceInfo{guid: g1}
+
+	// A second adapter with the same description is disambiguated by GUID, so
+	// it is not dropped and stays individually queryable.
+	k2 := uniqueIfaceKey(infos, "Intel Wi-Fi 6", g2)
+	assert.Equal(t, "Intel Wi-Fi 6 "+g2.String(), k2)
+	assert.NotEqual(t, k1, k2)
+
+	// A distinct description is untouched.
+	assert.Equal(t, "Realtek Wi-Fi", uniqueIfaceKey(infos, "Realtek Wi-Fi", g2))
+}
+
 // --- unavailableBackend ---
 
 func TestUnavailableBackend(t *testing.T) {
