@@ -105,8 +105,10 @@ func TestExtractEAPTypeFromXML(t *testing.T) {
 		{"empty", "", -1},
 		{"EapMethod but no Type", `<EapMethod></EapMethod>`, -1},
 		{"malformed Type value", `<EapMethod><Type>abc</Type></EapMethod>`, -1},
-		{"namespace prefixed (not matched)", `<EapMethod><eapCommon:Type>13</eapCommon:Type></EapMethod>`, -1},
+		{"namespace prefixed Type (matched by local name)", `<EapMethod><eapCommon:Type>13</eapCommon:Type></EapMethod>`, 13},
 		{"Type with attributes", `<EapMethod><Type xmlns="foo">21</Type></EapMethod>`, 21},
+		{"EapMethod with attributes", `<EapMethod foo="bar"><Type>21</Type></EapMethod>`, 21},
+		{"pretty-printed / indented", "<EapMethod>\n\t<Type>\n\t\t25\n\t</Type>\n</EapMethod>", 25},
 	}
 
 	for _, tc := range tests {
