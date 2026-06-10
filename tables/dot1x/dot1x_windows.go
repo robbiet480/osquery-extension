@@ -515,7 +515,9 @@ func extractTrustedRootCAFromXML(xmlStr string) string {
 				continue
 			}
 			hex := strings.Join(strings.Fields(text), "")
-			if len(hex) == 40 {
+			// A SHA-1 thumbprint is exactly 40 hex chars; require valid hex so
+			// malformed profile content isn't emitted as a bogus fingerprint.
+			if len(hex) == 40 && isHexString(hex) {
 				hashes = append(hashes, formatSHA1Hex(hex))
 			}
 		}
@@ -523,9 +525,24 @@ func extractTrustedRootCAFromXML(xmlStr string) string {
 	return strings.Join(hashes, ",")
 }
 
-// formatSHA1Hex converts a 40-char hex string to colon-separated pairs
-// (e.g. "aabb..." -> "aa:bb:...").
+// isHexString reports whether s consists solely of hexadecimal digits.
+func isHexString(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return false
+		}
+	}
+	return true
+}
+
+// formatSHA1Hex converts an even-length hex string to colon-separated pairs
+// (e.g. "aabb..." -> "aa:bb:..."). Returns "" for odd-length input rather than
+// panicking on the trailing 2-char slice.
 func formatSHA1Hex(hex string) string {
+	if len(hex)%2 != 0 {
+		return ""
+	}
 	hex = strings.ToLower(hex)
 	var buf strings.Builder
 	buf.Grow(59)

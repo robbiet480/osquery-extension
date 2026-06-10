@@ -45,7 +45,9 @@ copy_bazel_output() {
 		printf '%s\n' "$file" >&2
 		return 1
 	fi
-	cp "$file" "$dest"
+	# `--` guards against an output path that begins with `-` being parsed as
+	# a cp option.
+	cp -- "$file" "$dest"
 }
 
 # Mac binaries only build on macOS hosts (require Apple C++ toolchain + cgo).

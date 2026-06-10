@@ -217,6 +217,11 @@ func TestExtractTrustedRootCAFromXML(t *testing.T) {
 			"",
 		},
 		{
+			"40 non-hex chars rejected",
+			`<TrustedRootCA>zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz</TrustedRootCA>`,
+			"",
+		},
+		{
 			"newlines and tabs in hex (pretty-printed XML)",
 			"<TrustedRootCA>\n\t\t\t\t23 a6 b1 0a ff bb cc dd ee 11\n\t\t\t\t22 33 44 55 66 77 88 99 aa bb\n\t\t\t</TrustedRootCA>",
 			"23:a6:b1:0a:ff:bb:cc:dd:ee:11:22:33:44:55:66:77:88:99:aa:bb",
@@ -242,6 +247,12 @@ func TestFormatSHA1Hex(t *testing.T) {
 	assert.Equal(t,
 		"aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd",
 		formatSHA1Hex("AABBCCDDEEFF00112233445566778899AABBCCDD"))
+
+	// Odd-length / short input must not panic on the trailing 2-char slice.
+	assert.Equal(t, "", formatSHA1Hex(""))
+	assert.Equal(t, "", formatSHA1Hex("a"))
+	assert.Equal(t, "", formatSHA1Hex("abc"))
+	assert.Equal(t, "aa:bb", formatSHA1Hex("aabb"))
 }
 
 // --- mapWlanState tests ---
