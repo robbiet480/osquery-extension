@@ -4,6 +4,7 @@ package dot1x
 
 import (
 	"errors"
+	"os"
 	"testing"
 
 	"github.com/osquery/osquery-go/plugin/table"
@@ -112,6 +113,7 @@ func TestExtractEAPTypeFromXML(t *testing.T) {
 	}
 
 	for _, tc := range tests {
+		tc := tc // Go 1.22+ scopes this per-iteration; explicit for the linter.
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := extractEAPTypeFromXML(tc.xml)
@@ -139,6 +141,7 @@ func TestExtractAuthModeFromXML(t *testing.T) {
 	}
 
 	for _, tc := range tests {
+		tc := tc // Go 1.22+ scopes this per-iteration; explicit for the linter.
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := extractAuthModeFromXML(tc.xml)
@@ -163,6 +166,7 @@ func TestExtractInnerEAPTypeFromXML(t *testing.T) {
 	}
 
 	for _, tc := range tests {
+		tc := tc // Go 1.22+ scopes this per-iteration; explicit for the linter.
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := extractInnerEAPTypeFromXML(tc.xml)
@@ -220,6 +224,7 @@ func TestExtractTrustedRootCAFromXML(t *testing.T) {
 	}
 
 	for _, tc := range tests {
+		tc := tc // Go 1.22+ scopes this per-iteration; explicit for the linter.
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := extractTrustedRootCAFromXML(tc.xml)
@@ -262,6 +267,7 @@ func TestMapWlanState(t *testing.T) {
 	}
 
 	for _, tc := range tests {
+		tc := tc // Go 1.22+ scopes this per-iteration; explicit for the linter.
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			gotState, gotSupplicant := mapWlanState(tc.input)
@@ -309,6 +315,7 @@ func TestUtf16ToString(t *testing.T) {
 	}
 
 	for _, tc := range tests {
+		tc := tc // Go 1.22+ scopes this per-iteration; explicit for the linter.
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := utf16ToString(tc.input)
@@ -493,7 +500,19 @@ func TestWindowsMockBackendUnavailable(t *testing.T) {
 
 // --- Live backend smoke test ---
 
+// requireLiveTests gates the live WLAN tests, which depend on host networking
+// and the WLAN service and are therefore non-deterministic in CI. They run
+// only when DOT1X_LIVE_TESTS is set, keeping the mock-based tests as the
+// default coverage.
+func requireLiveTests(t *testing.T) {
+	t.Helper()
+	if os.Getenv("DOT1X_LIVE_TESTS") == "" {
+		t.Skip("set DOT1X_LIVE_TESTS=1 to run live WLAN backend tests")
+	}
+}
+
 func TestWindowsLiveBackend(t *testing.T) {
+	requireLiveTests(t)
 	backend := newBackend()
 
 	if _, ok := backend.(unavailableBackend); ok {
@@ -519,6 +538,7 @@ func TestWindowsLiveBackend(t *testing.T) {
 }
 
 func TestWindowsLiveBackendBogusInterface(t *testing.T) {
+	requireLiveTests(t)
 	backend := newBackend()
 
 	if _, ok := backend.(unavailableBackend); ok {
@@ -536,6 +556,7 @@ func TestWindowsLiveBackendBogusInterface(t *testing.T) {
 // --- Real profile XML extraction (end-to-end on live system) ---
 
 func TestWindowsLiveProfileXMLExtraction(t *testing.T) {
+	requireLiveTests(t)
 	backend := newBackend()
 
 	if _, ok := backend.(unavailableBackend); ok {

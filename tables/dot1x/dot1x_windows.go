@@ -280,8 +280,15 @@ func (b *windowsBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 		uintptr(unsafe.Pointer(&dataPtr)),
 		uintptr(unsafe.Pointer(&opcodeValueType)),
 	)
-	if ret != 0 || dataPtr == nil {
-		return s, nil
+	if ret != 0 {
+		// The interface reports connected/authenticating, so a failed
+		// current-connection query would leave a misleading "successful" row
+		// missing MAC/EAP/profile data. Return a per-interface error so
+		// generateRows skips it rather than emitting a partial row.
+		return s, fmt.Errorf("WlanQueryInterface(current_connection) failed for %q: %w", ifname, syscall.Errno(ret))
+	}
+	if dataPtr == nil {
+		return s, fmt.Errorf("WlanQueryInterface(current_connection) returned no data for %q", ifname)
 	}
 	defer freeWlanMemory(uintptr(dataPtr))
 
