@@ -5,6 +5,7 @@ package dot1x
 /*
 #include <CoreFoundation/CoreFoundation.h>
 #include <dlfcn.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -21,18 +22,33 @@ typedef int (*EAPOLControlCopyStateAndStatusFn)(const char*, uint32_t*, CFDictio
 
 static EAPOLControlCopyStateAndStatusFn copy_state_fn = NULL;
 
+// load_error holds the dlopen/dlsym failure reason (from dlerror) so the Go
+// layer can surface it for diagnosis; empty when load succeeded.
+static char load_error[256] = {0};
+
 static int load_dot1x(void) {
 	if (copy_state_fn) return 1;
 	// Handle intentionally held for process lifetime (sync.Once); the
 	// framework must stay loaded for copy_state_fn to remain valid.
 	void* h = dlopen("/System/Library/PrivateFrameworks/EAP8021X.framework/EAP8021X", RTLD_LAZY);
-	if (!h) return 0;
+	if (!h) {
+		const char* e = dlerror();
+		snprintf(load_error, sizeof(load_error), "dlopen: %s", e ? e : "unknown error");
+		return 0;
+	}
 	copy_state_fn = (EAPOLControlCopyStateAndStatusFn)dlsym(h, "EAPOLControlCopyStateAndStatus");
 	if (!copy_state_fn) {
+		const char* e = dlerror();
+		snprintf(load_error, sizeof(load_error), "dlsym: %s", e ? e : "unknown error");
 		dlclose(h);
 		return 0;
 	}
 	return 1;
+}
+
+// dot1x_load_error returns the captured load failure reason, or NULL if none.
+static const char* dot1x_load_error(void) {
+	return load_error[0] ? load_error : NULL;
 }
 
 // cfstring_go creates a Go-owned copy of a CFString as a malloc'd C string.
@@ -432,7 +448,11 @@ func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 
 	if ret != 0 {
 		if ret == -1 {
-			return s, fmt.Errorf("%w: could not load EAPOLControlCopyStateAndStatus for %s", ErrBackendUnavailable, ifname)
+			reason := "unknown error"
+			if cerr := C.dot1x_load_error(); cerr != nil {
+				reason = C.GoString(cerr)
+			}
+			return s, fmt.Errorf("%w: could not load EAPOLControlCopyStateAndStatus for %s: %s", ErrBackendUnavailable, ifname, reason)
 		}
 		return s, fmt.Errorf("EAPOLControlCopyStateAndStatus returned %d for %s", int(ret), ifname)
 	}

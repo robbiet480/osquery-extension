@@ -70,8 +70,10 @@ func TestInterfacesToQuery(t *testing.T) {
 		t.Parallel()
 		qc := table.QueryContext{}
 		ifaces := interfacesToQuery(qc)
-		assert.NotEmpty(t, ifaces)
-		if di := defaultInterfaces(); len(di) > 0 {
+		// A non-nil platform default (incl. an empty slice, e.g. Windows with
+		// no WLAN adapters) is authoritative; only a nil default falls back to
+		// the generic en0-en9 probe list.
+		if di := defaultInterfaces(); di != nil {
 			assert.Equal(t, di, ifaces)
 		} else {
 			assert.Len(t, ifaces, 10)
@@ -106,8 +108,9 @@ func TestInterfacesToQuery(t *testing.T) {
 				},
 			},
 		}
-		ifaces := interfacesToQuery(qc)
-		assert.NotEmpty(t, ifaces)
+		// LIKE is not exact-match, so it falls back to the same platform
+		// defaults an unconstrained query would use.
+		assert.Equal(t, interfacesToQuery(table.QueryContext{}), interfacesToQuery(qc))
 	})
 
 	t.Run("duplicate constraints deduplicated", func(t *testing.T) {

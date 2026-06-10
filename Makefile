@@ -55,8 +55,14 @@ test:
 	# cgo=True in root BUILD.bazel) and fail on Linux CI where no darwin
 	# C++ toolchain exists.
 	# Matching all *_test kinds (not just go_test) keeps non-Go tests
-	# (sh_test, py_test, etc.) in scope if any are added later.
-	targets=$$(bazel query 'kind(".*_test", //...)') && bazel test --test_output=errors $$targets
+	# (sh_test, py_test, etc.) in scope if any are added later. The target
+	# list is passed via --target_pattern_file rather than expanded onto the
+	# command line, so a growing test set can't hit argv length limits.
+	@set -e; \
+	targets="$$(mktemp "$${TMPDIR:-/tmp}/dot1x-test-targets.XXXXXX")"; \
+	trap 'rm -f "$$targets"' EXIT; \
+	bazel query 'kind(".*_test", //...)' > "$$targets"; \
+	bazel test --test_output=errors --target_pattern_file="$$targets"
 
 build: .pre-build
 ifeq ($(shell uname),Darwin)

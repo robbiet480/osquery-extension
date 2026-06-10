@@ -184,7 +184,11 @@ func interfacesToQuery(queryContext table.QueryContext) []string {
 		}
 	}
 
-	if ifaces := defaultInterfaces(); len(ifaces) > 0 {
+	// A non-nil result from defaultInterfaces() is authoritative, even when
+	// empty: e.g. a Windows host with no WLAN adapters returns an empty slice
+	// (query nothing) rather than falling through to the macOS-style en0-en9
+	// probe list. Only a nil result (defaults unknown) uses that fallback.
+	if ifaces := defaultInterfaces(); ifaces != nil {
 		return ifaces
 	}
 	fallback := make([]string, 10)

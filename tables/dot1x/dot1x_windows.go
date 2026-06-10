@@ -233,11 +233,11 @@ func enumerateWlanInterfaces() []string {
 }
 
 func defaultInterfaces() []string {
-	ifaces := enumerateWlanInterfaces()
-	if len(ifaces) == 0 {
-		return nil
-	}
-	return ifaces
+	// Return enumerateWlanInterfaces' result as-is so the nil/empty distinction
+	// is preserved: nil means WLAN is unavailable or enumeration failed
+	// (defaults unknown -> caller's generic fallback), while a non-nil empty
+	// slice means "successfully enumerated, no wireless adapters" (query none).
+	return enumerateWlanInterfaces()
 }
 
 // snapshot lazily enumerates interfaces once per backend instance (i.e. once
