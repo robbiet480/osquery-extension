@@ -3,6 +3,7 @@
 package dot1x
 
 import (
+	"context"
 	"errors"
 	"os"
 	"testing"
@@ -170,7 +171,7 @@ func TestWindowsMockBackendConnected(t *testing.T) {
 	}
 
 	qc := constraintFor("RZ616 Wi-Fi 6E 160MHz")
-	rows, err := generateRows(t.Context(), backend, qc)
+	rows, err := generateRows(context.Background(), backend, qc)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 
@@ -217,7 +218,7 @@ func TestWindowsMockBackendDisconnected(t *testing.T) {
 	}
 
 	qc := constraintFor("Intel Wi-Fi 6")
-	rows, err := generateRows(t.Context(), backend, qc)
+	rows, err := generateRows(context.Background(), backend, qc)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 
@@ -258,7 +259,7 @@ func TestWindowsMockBackendPEAP(t *testing.T) {
 	}
 
 	qc := constraintFor("Realtek Wi-Fi")
-	rows, err := generateRows(t.Context(), backend, qc)
+	rows, err := generateRows(context.Background(), backend, qc)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 
@@ -276,7 +277,7 @@ func TestWindowsMockBackendNotFound(t *testing.T) {
 
 	backend := fakeBackend{statuses: map[string]Dot1XStatus{}}
 	qc := constraintFor("nonexistent adapter")
-	rows, err := generateRows(t.Context(), backend, qc)
+	rows, err := generateRows(context.Background(), backend, qc)
 	require.NoError(t, err)
 	assert.Empty(t, rows)
 }
@@ -286,7 +287,7 @@ func TestWindowsMockBackendUnavailable(t *testing.T) {
 
 	backend := errBackend{err: ErrBackendUnavailable}
 	qc := constraintFor("any")
-	rows, err := generateRows(t.Context(), backend, qc)
+	rows, err := generateRows(context.Background(), backend, qc)
 	assert.ErrorIs(t, err, ErrBackendUnavailable)
 	assert.Empty(t, rows)
 }

@@ -3,6 +3,7 @@
 package dot1x
 
 import (
+	"context"
 	"testing"
 
 	"github.com/osquery/osquery-go/plugin/table"
@@ -78,7 +79,7 @@ func TestDarwinMockBackendSystemEAPTLS(t *testing.T) {
 		},
 	}
 
-	rows, err := generateRows(t.Context(), backend, constraintFor("en0"))
+	rows, err := generateRows(context.Background(), backend, constraintFor("en0"))
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 
@@ -132,7 +133,7 @@ func TestDarwinMockBackendIdle(t *testing.T) {
 		},
 	}
 
-	rows, err := generateRows(t.Context(), backend, constraintFor("en0"))
+	rows, err := generateRows(context.Background(), backend, constraintFor("en0"))
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 
@@ -178,7 +179,7 @@ func TestDarwinMockBackendPEAP(t *testing.T) {
 		},
 	}
 
-	rows, err := generateRows(t.Context(), backend, constraintFor("en1"))
+	rows, err := generateRows(context.Background(), backend, constraintFor("en1"))
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 
@@ -213,7 +214,7 @@ func TestDarwinMockBackendUnknownEAPType(t *testing.T) {
 		},
 	}
 
-	rows, err := generateRows(t.Context(), backend, constraintFor("en0"))
+	rows, err := generateRows(context.Background(), backend, constraintFor("en0"))
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, "99", rows[0]["eap_type"])
@@ -242,7 +243,7 @@ func TestDarwinMockBackendMultipleInterfaces(t *testing.T) {
 		},
 	}
 
-	rows, err := generateRows(t.Context(), backend, qc)
+	rows, err := generateRows(context.Background(), backend, qc)
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
 	assert.Equal(t, "en0", rows[0]["interface"])
@@ -257,7 +258,7 @@ func TestDarwinMockBackendNotFound(t *testing.T) {
 	// An interface the backend doesn't know about errors per-interface, and
 	// generateRows skips it, yielding zero rows.
 	backend := fakeBackend{statuses: map[string]Dot1XStatus{}}
-	rows, err := generateRows(t.Context(), backend, constraintFor("en0"))
+	rows, err := generateRows(context.Background(), backend, constraintFor("en0"))
 	require.NoError(t, err)
 	assert.Empty(t, rows)
 }
@@ -268,7 +269,7 @@ func TestDarwinMockBackendUnavailable(t *testing.T) {
 	// A systemic ErrBackendUnavailable (e.g. EAP8021X.framework failed to
 	// load) propagates rather than being swallowed as a per-interface miss.
 	backend := errBackend{err: ErrBackendUnavailable}
-	rows, err := generateRows(t.Context(), backend, constraintFor("en0"))
+	rows, err := generateRows(context.Background(), backend, constraintFor("en0"))
 	assert.ErrorIs(t, err, ErrBackendUnavailable)
 	assert.Empty(t, rows)
 }

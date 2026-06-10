@@ -67,8 +67,17 @@ go_library(
 # toolchain on darwin. These are darwin-only binaries (goos = "darwin"),
 # so cgo=True does not affect Linux/Windows builds. The apple_support
 # toolchain in WORKSPACE satisfies the CC requirement on macOS.
-# Note: these targets require a darwin C++ toolchain, so they only build
-# on macOS hosts (the Makefile gates them behind `ifeq ($(shell uname),Darwin)`).
+#
+# These targets require a darwin C++ toolchain (only available on macOS
+# hosts), so they are tagged "manual" to keep them out of `//...` / `:all`
+# wildcard expansion. That way `bazel build //...` / `bazel test //...` on a
+# Linux/Windows host won't try to analyze them and fail; they still build when
+# named explicitly (the Makefile and tools/bazel_to_builddir.sh do so, gated
+# behind `ifeq ($(shell uname),Darwin)`).
+#
+# target_compatible_with is not used here: the goos="darwin" platform
+# transition makes the resolved target platform macOS, so a macos constraint
+# would always be satisfied and would never skip the target on a Linux host.
 go_binary(
     name = "osquery-extension-mac-arm",
     cgo = True,
@@ -76,6 +85,7 @@ go_binary(
     goarch = "arm64",
     goos = "darwin",
     pure = "off",
+    tags = ["manual"],
     visibility = ["//visibility:public"],
 )
 
@@ -86,6 +96,7 @@ go_binary(
     goarch = "amd64",
     goos = "darwin",
     pure = "off",
+    tags = ["manual"],
     visibility = ["//visibility:public"],
 )
 
