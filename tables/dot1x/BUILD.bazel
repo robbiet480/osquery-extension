@@ -6,6 +6,7 @@ go_library(
         "dot1x.go",
         "dot1x_darwin.go",
         "dot1x_other.go",
+        "dot1x_wlanprofile.go",
         "dot1x_windows.go",
     ],
     # cgo is only needed on darwin: dot1x_darwin.go (//go:build darwin) calls
@@ -41,6 +42,7 @@ go_test(
         "dot1x_test.go",
         "dot1x_darwin_test.go",
         "dot1x_other_test.go",
+        "dot1x_wlanprofile_test.go",
         "dot1x_windows_test.go",
     ],
     embed = [":dot1x"],
