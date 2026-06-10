@@ -72,8 +72,8 @@ go_library(
 # hosts), so they are tagged "manual" to keep them out of `//...` / `:all`
 # wildcard expansion. That way `bazel build //...` / `bazel test //...` on a
 # Linux/Windows host won't try to analyze them and fail; they still build when
-# named explicitly (the Makefile and tools/bazel_to_builddir.sh do so, gated
-# behind `ifeq ($(shell uname),Darwin)`).
+# named explicitly (the Makefile and tools/bazel_to_builddir.sh do so, gated on
+# the host OS via `ifeq ($(UNAME_S),Darwin)` and `[ "$host_os" = "Darwin" ]`).
 #
 # target_compatible_with is not used here: the goos="darwin" platform
 # transition makes the resolved target platform macOS, so a macos constraint

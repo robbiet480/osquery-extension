@@ -7,6 +7,11 @@ mkdir -p build/windows
 
 APP_NAME="macadmins_extension"
 
+# Captured once with stderr suppressed and failure tolerated (some Windows
+# shells / CI images lack uname), so `set -e` can't abort the Linux/Windows
+# copies below when uname is unavailable. Empty value => not Darwin.
+host_os="$(uname -s 2>/dev/null || true)"
+
 # copy_bazel_output TARGET DEST copies the single output file of a bazel
 # target to DEST. It captures the cquery result, validates that exactly one
 # non-empty path was returned, and quotes the path so files with whitespace
@@ -62,7 +67,7 @@ copy_bazel_output() {
 }
 
 # Mac binaries only build on macOS hosts (require Apple C++ toolchain + cgo).
-if [ "$(uname)" = "Darwin" ]; then
+if [ "$host_os" = "Darwin" ]; then
 	copy_bazel_output //:osquery-extension-mac-amd "build/darwin/${APP_NAME}.amd64.ext"
 	copy_bazel_output //:osquery-extension-mac-arm "build/darwin/${APP_NAME}.arm64.ext"
 fi
