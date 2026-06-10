@@ -358,21 +358,22 @@ func (b *windowsBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 	profileName := utf16ToString(conn.ProfileName[:])
 	if profileName != "" {
 		if xmlStr, err := getWlanProfileXML(b.handle, &guid, profileName); err == nil {
-			if eapType := extractEAPTypeFromXML(xmlStr); eapType > 0 {
-				s.EAPType = eapType
+			profile := parseWLANProfile(xmlStr) // single pass over the XML
+			if profile.eapType > 0 {
+				s.EAPType = profile.eapType
 			}
-			if mode := extractAuthModeFromXML(xmlStr); mode >= 0 {
-				s.Mode = mode
+			if profile.authMode >= 0 {
+				s.Mode = profile.authMode
 			}
-			if innerType := extractInnerEAPTypeFromXML(xmlStr); innerType > 0 {
-				s.InnerEAPType = innerType
+			if profile.innerEAPType > 0 {
+				s.InnerEAPType = profile.innerEAPType
 			}
 			// These are the configured trusted root CA thumbprints (server
 			// validation), not the presented server certificate's fingerprint,
 			// so they go in TLSTrustedRootCASHA1 rather than
 			// TLSServerCertificateSHA1 (which macOS fills with the actual chain).
-			if sha1 := extractTrustedRootCAFromXML(xmlStr); sha1 != "" {
-				s.TLSTrustedRootCASHA1 = sha1
+			if profile.trustedRootCASHA1 != "" {
+				s.TLSTrustedRootCASHA1 = profile.trustedRootCASHA1
 			}
 		}
 	}

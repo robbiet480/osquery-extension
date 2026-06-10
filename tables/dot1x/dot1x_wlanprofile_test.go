@@ -88,7 +88,7 @@ const peapProfileXML = `<?xml version="1.0"?>
 	</MSM>
 </WLANProfile>`
 
-func TestExtractEAPTypeFromXML(t *testing.T) {
+func TestParseWLANProfileEAPType(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -112,13 +112,13 @@ func TestExtractEAPTypeFromXML(t *testing.T) {
 		tc := tc // Go 1.22+ scopes this per-iteration; explicit for the linter.
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := extractEAPTypeFromXML(tc.xml)
+			got := parseWLANProfile(tc.xml).eapType
 			assert.Equal(t, tc.want, got)
 		})
 	}
 }
 
-func TestExtractAuthModeFromXML(t *testing.T) {
+func TestParseWLANProfileAuthMode(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -140,13 +140,13 @@ func TestExtractAuthModeFromXML(t *testing.T) {
 		tc := tc // Go 1.22+ scopes this per-iteration; explicit for the linter.
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := extractAuthModeFromXML(tc.xml)
+			got := parseWLANProfile(tc.xml).authMode
 			assert.Equal(t, tc.want, got)
 		})
 	}
 }
 
-func TestExtractInnerEAPTypeFromXML(t *testing.T) {
+func TestParseWLANProfileInnerEAPType(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -165,13 +165,13 @@ func TestExtractInnerEAPTypeFromXML(t *testing.T) {
 		tc := tc // Go 1.22+ scopes this per-iteration; explicit for the linter.
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := extractInnerEAPTypeFromXML(tc.xml)
+			got := parseWLANProfile(tc.xml).innerEAPType
 			assert.Equal(t, tc.want, got)
 		})
 	}
 }
 
-func TestExtractTrustedRootCAFromXML(t *testing.T) {
+func TestParseWLANProfileTrustedRootCA(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -228,7 +228,7 @@ func TestExtractTrustedRootCAFromXML(t *testing.T) {
 		tc := tc // Go 1.22+ scopes this per-iteration; explicit for the linter.
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := extractTrustedRootCAFromXML(tc.xml)
+			got := parseWLANProfile(tc.xml).trustedRootCASHA1
 			assert.Equal(t, tc.want, got)
 		})
 	}

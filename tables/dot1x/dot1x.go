@@ -196,14 +196,17 @@ func interfacesToQuery(backend Dot1XBackend, queryContext table.QueryContext) []
 	}
 
 	// Prefer the backend's own enumeration when it provides one (the Windows
-	// backend shares its per-generation snapshot), otherwise the package
-	// default. A non-nil result is authoritative even when empty: a Windows
-	// host with no WLAN adapters returns an empty slice (query nothing) rather
-	// than falling through to the macOS-style en0-en9 probe list. Only a nil
-	// result (defaults unknown) uses that fallback.
-	defaults := defaultInterfaces()
+	// backend shares its per-generation snapshot, so we must NOT also call the
+	// package defaultInterfaces() — that would enumerate a second time);
+	// otherwise use the package default. A non-nil result is authoritative even
+	// when empty: a Windows host with no WLAN adapters returns an empty slice
+	// (query nothing) rather than falling through to the macOS-style en0-en9
+	// probe list. Only a nil result (defaults unknown) uses that fallback.
+	var defaults []string
 	if l, ok := backend.(interfaceLister); ok {
 		defaults = l.interfaceNames()
+	} else {
+		defaults = defaultInterfaces()
 	}
 	if defaults != nil {
 		return defaults
