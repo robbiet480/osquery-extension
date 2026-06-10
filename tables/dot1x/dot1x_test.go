@@ -35,6 +35,19 @@ func (f fakeBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 	return Dot1XStatus{Interface: ifname}, errors.New("not found")
 }
 
+// stubLister is a Dot1XBackend that also implements interfaceLister, returning
+// a fixed interface list. It keeps interfacesToQuery tests deterministic
+// (independent of host WLAN state) when exercising the default-list path.
+type stubLister struct {
+	names []string
+}
+
+func (stubLister) GetStatus(ifname string) (Dot1XStatus, error) {
+	return Dot1XStatus{Interface: ifname}, errors.New("not found")
+}
+
+func (s stubLister) interfaceNames() []string { return s.names }
+
 func TestDot1XStatusColumns(t *testing.T) {
 	t.Parallel()
 	want := []string{
@@ -67,20 +80,29 @@ func TestDot1XStatusColumns(t *testing.T) {
 func TestInterfacesToQuery(t *testing.T) {
 	t.Parallel()
 
-	t.Run("no constraint returns default interfaces", func(t *testing.T) {
+	t.Run("no constraint uses backend-provided defaults", func(t *testing.T) {
 		t.Parallel()
-		qc := table.QueryContext{}
-		ifaces := interfacesToQuery(fakeBackend{}, qc)
-		// A non-nil platform default (incl. an empty slice, e.g. Windows with
-		// no WLAN adapters) is authoritative; only a nil default falls back to
-		// the generic en0-en9 probe list.
-		if di := defaultInterfaces(); di != nil {
-			assert.Equal(t, di, ifaces)
-		} else {
-			assert.Len(t, ifaces, 10)
-			assert.Equal(t, "en0", ifaces[0])
-			assert.Equal(t, "en9", ifaces[9])
-		}
+		backend := stubLister{names: []string{"wlan0", "wlan1"}}
+		ifaces := interfacesToQuery(backend, table.QueryContext{})
+		assert.Equal(t, []string{"wlan0", "wlan1"}, ifaces)
+	})
+
+	t.Run("empty backend defaults query nothing", func(t *testing.T) {
+		t.Parallel()
+		// Non-nil empty (e.g. enumerated, no WLAN adapters) is authoritative.
+		backend := stubLister{names: []string{}}
+		ifaces := interfacesToQuery(backend, table.QueryContext{})
+		assert.Empty(t, ifaces)
+	})
+
+	t.Run("nil backend defaults fall back to en0-en9", func(t *testing.T) {
+		t.Parallel()
+		// nil means defaults unknown -> generic probe list.
+		backend := stubLister{names: nil}
+		ifaces := interfacesToQuery(backend, table.QueryContext{})
+		require.Len(t, ifaces, 10)
+		assert.Equal(t, "en0", ifaces[0])
+		assert.Equal(t, "en9", ifaces[9])
 	})
 
 	t.Run("with equals constraint returns specified interface", func(t *testing.T) {
@@ -109,9 +131,10 @@ func TestInterfacesToQuery(t *testing.T) {
 				},
 			},
 		}
-		// LIKE is not exact-match, so it falls back to the same platform
-		// defaults an unconstrained query would use.
-		assert.Equal(t, interfacesToQuery(fakeBackend{}, table.QueryContext{}), interfacesToQuery(fakeBackend{}, qc))
+		// LIKE is not exact-match, so it falls back to the backend defaults an
+		// unconstrained query would use.
+		backend := stubLister{names: []string{"wlan0"}}
+		assert.Equal(t, []string{"wlan0"}, interfacesToQuery(backend, qc))
 	})
 
 	t.Run("duplicate constraints deduplicated", func(t *testing.T) {
