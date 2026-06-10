@@ -253,8 +253,10 @@ func (b *windowsBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 	infos, err := b.snapshot()
 	if err != nil {
 		// Enumeration failing is systemic (affects every interface), so report
-		// it as backend-unavailable rather than a per-interface miss.
-		return Dot1XStatus{Interface: ifname}, fmt.Errorf("%w: %v", ErrBackendUnavailable, err)
+		// it as backend-unavailable rather than a per-interface miss. Both are
+		// wrapped (%w) so errors.Is(ErrBackendUnavailable) holds and the
+		// underlying WlanEnumInterfaces error stays introspectable.
+		return Dot1XStatus{Interface: ifname}, fmt.Errorf("%w: %w", ErrBackendUnavailable, err)
 	}
 	info, ok := infos[ifname]
 	if !ok {

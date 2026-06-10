@@ -194,7 +194,9 @@ static uint8_t* pack_cert_chain(CFArrayRef certs, CFIndex* out_len) {
 }
 
 // dot1x_query calls EAPOLControlCopyStateAndStatus for the given interface
-// and fills the provided Go-accessible fields. Returns 0 on success.
+// and fills the provided Go-accessible fields. Returns 0 on success, -1 if the
+// framework/symbol could not be loaded, -2 if the call reported success but
+// returned no status dictionary, otherwise the EAPOLControl error code.
 // All string/buffer outputs are malloc'd and must be freed by the caller.
 int dot1x_query(
 	const char* ifname,
@@ -247,7 +249,11 @@ int dot1x_query(
 
 	if (ret != 0 || status == NULL) {
 		if (status) CFRelease(status);
-		return ret;
+		// status == NULL with ret == 0 means the call "succeeded" but provided
+		// no status dictionary (no usable per-interface data). Return a
+		// distinct code (-2) so the Go layer raises a per-interface error and
+		// the interface is skipped, rather than emitting a row of sentinels.
+		return ret != 0 ? ret : -2;
 	}
 
 	*out_state = (int)state;
@@ -453,6 +459,9 @@ func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 				reason = C.GoString(cerr)
 			}
 			return s, fmt.Errorf("%w: could not load EAPOLControlCopyStateAndStatus for %s: %s", ErrBackendUnavailable, ifname, reason)
+		}
+		if ret == -2 {
+			return s, fmt.Errorf("EAPOLControlCopyStateAndStatus returned no status for %s", ifname)
 		}
 		return s, fmt.Errorf("EAPOLControlCopyStateAndStatus returned %d for %s", int(ret), ifname)
 	}
