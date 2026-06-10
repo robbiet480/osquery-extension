@@ -41,6 +41,7 @@ go_test(
     srcs = [
         "dot1x_test.go",
         "dot1x_darwin_test.go",
+        "dot1x_helpers_test.go",
         "dot1x_other_test.go",
         "dot1x_wlanprofile_test.go",
         "dot1x_windows_test.go",

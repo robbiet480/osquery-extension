@@ -40,9 +40,11 @@ type Dot1XStatus struct {
 	UniqueIdentifier             string
 }
 
-// Dot1XBackend fetches 802.1X status for a named interface.
-// Production implementation calls EAPOLControlCopyStateAndStatus
-// via cgo (dot1x_darwin.go); tests inject a fake.
+// Dot1XBackend fetches 802.1X status for a named interface. The production
+// implementation is platform-specific: macOS calls EAPOLControlCopyStateAndStatus
+// from EAP8021X.framework via cgo (dot1x_darwin.go); Windows queries wlanapi.dll
+// and parses WLAN profile XML (dot1x_windows.go); other platforms use a noop
+// backend that reports ErrBackendUnavailable (dot1x_other.go). Tests inject a fake.
 type Dot1XBackend interface {
 	GetStatus(ifname string) (Dot1XStatus, error)
 }

@@ -273,17 +273,3 @@ func TestDarwinMockBackendUnavailable(t *testing.T) {
 	assert.ErrorIs(t, err, ErrBackendUnavailable)
 	assert.Empty(t, rows)
 }
-
-// --- helpers ---
-
-func constraintFor(ifname string) table.QueryContext {
-	return table.QueryContext{
-		Constraints: map[string]table.ConstraintList{
-			"interface": {
-				Constraints: []table.Constraint{
-					{Operator: table.OperatorEquals, Expression: ifname},
-				},
-			},
-		},
-	}
-}

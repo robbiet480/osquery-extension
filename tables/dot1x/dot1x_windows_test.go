@@ -8,7 +8,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/osquery/osquery-go/plugin/table"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -378,18 +377,4 @@ func TestWindowsLiveProfileXMLExtraction(t *testing.T) {
 		return
 	}
 	t.Skip("no connected wireless interface found")
-}
-
-// --- helpers ---
-
-func constraintFor(ifname string) table.QueryContext {
-	return table.QueryContext{
-		Constraints: map[string]table.ConstraintList{
-			"interface": {
-				Constraints: []table.Constraint{
-					{Operator: table.OperatorEquals, Expression: ifname},
-				},
-			},
-		},
-	}
 }
