@@ -21,6 +21,9 @@ copy_bazel_output() {
 	# Template form works on both GNU and BSD/macOS mktemp (a bare `mktemp`
 	# with no template is not portable to BSD).
 	err="$(mktemp "${TMPDIR:-/tmp}/bazel_to_builddir.XXXXXX")"
+	# Remove the temp file on every return path (including errors added later
+	# or an abrupt exit), so it can't leak under `set -e`.
+	trap 'rm -f "$err"' RETURN
 	# Capture stderr and the exit code so an actual bazel/cquery failure
 	# (missing bazel, bad workspace, query error) is reported distinctly from
 	# a successful-but-empty result. The `&& rc=0 || rc=$?` idiom records the
@@ -29,10 +32,8 @@ copy_bazel_output() {
 	if [ "$rc" -ne 0 ]; then
 		echo "error: 'bazel cquery' failed for ${target} (exit ${rc}):" >&2
 		cat "$err" >&2
-		rm -f "$err"
 		return 1
 	fi
-	rm -f "$err"
 	if [ -z "$file" ]; then
 		echo "error: no output file for ${target} (target produced no outputs)" >&2
 		return 1

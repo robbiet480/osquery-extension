@@ -75,25 +75,34 @@ func parseWLANProfile(xmlStr string) wlanProfileInfo {
 }
 
 // readEapMethodType reads forward from just after an <EapMethod> StartElement
-// and returns the int value of the first <Type> nested within it, or
-// (0, false) if the element closes first or the value is non-numeric.
+// and returns the int value of the first <Type> nested within it. It always
+// consumes through the matching </EapMethod> before returning, so the caller's
+// scan stays aligned and any nested <EapMethod> is swallowed here rather than
+// being miscounted as a separate method. Returns (0, false) if no numeric
+// <Type> was found.
 func readEapMethodType(dec *xml.Decoder) (int, bool) {
 	depth := 1 // we are inside the EapMethod element
+	value, found := 0, false
 	for {
 		tok, err := dec.Token()
 		if err != nil {
-			return 0, false
+			return value, found
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
-			if t.Name.Local == "Type" {
-				return readIntCharData(dec)
+			if !found && t.Name.Local == "Type" {
+				if v, ok := readIntCharData(dec); ok {
+					value, found = v, true
+				}
+				// readIntCharData consumed this element through its </Type>,
+				// so depth is unchanged; keep scanning to the EapMethod's end.
+				continue
 			}
 			depth++
 		case xml.EndElement:
 			depth--
 			if depth == 0 {
-				return 0, false // left the EapMethod without a Type
+				return value, found // consumed the whole EapMethod
 			}
 		}
 	}
@@ -171,12 +180,12 @@ func isHexString(s string) bool {
 // (e.g. "aabb..." -> "aa:bb:..."). Returns "" for odd-length input rather than
 // panicking on the trailing 2-char slice.
 func formatSHA1Hex(hex string) string {
-	if len(hex)%2 != 0 {
+	if len(hex) == 0 || len(hex)%2 != 0 {
 		return ""
 	}
 	hex = strings.ToLower(hex)
 	var buf strings.Builder
-	buf.Grow(59)
+	buf.Grow(len(hex) + len(hex)/2) // hex chars + colon separators
 	for i := 0; i < len(hex); i += 2 {
 		if i > 0 {
 			buf.WriteByte(':')
