@@ -4,6 +4,10 @@ current_dir = $(shell pwd)
 
 SHELL = /bin/sh
 
+# Computed once, with a safe empty default if `uname` is unavailable (some
+# Windows shells / CI images). Used to gate the darwin-only binary builds.
+UNAME_S := $(shell uname -s 2>/dev/null)
+
 BAZEL_OUTPUT_PATH := $(shell bazel info output_path)
 
 APP_NAME = macadmins_extension
@@ -65,7 +69,7 @@ test:
 	bazel test --test_output=errors --target_pattern_file="$$targets"
 
 build: .pre-build
-ifeq ($(shell uname),Darwin)
+ifeq ($(UNAME_S),Darwin)
 	bazel build --verbose_failures //:osquery-extension-mac-amd
 	bazel build --verbose_failures //:osquery-extension-mac-arm
 endif

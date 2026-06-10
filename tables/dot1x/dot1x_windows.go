@@ -100,6 +100,9 @@ var (
 	wlanOnce sync.Once
 	// wlanAvail reports whether wlanapi.dll loaded and a client handle opened.
 	wlanAvail bool
+	// wlanInitErr records why initWlan failed (DLL load, missing proc, or
+	// WlanOpenHandle), so unavailableBackend can report a specific reason.
+	wlanInitErr error
 	// wlanHandle is a process-lifetime WLAN client handle opened once in
 	// initWlan and reused by every query. Like the darwin framework handle, it
 	// is intentionally never closed — the OS reclaims it at process exit, and
@@ -109,6 +112,7 @@ var (
 
 func initWlan() {
 	if err := modWlanapi.Load(); err != nil {
+		wlanInitErr = fmt.Errorf("loading wlanapi.dll: %w", err)
 		return
 	}
 	for _, p := range []*windows.LazyProc{
@@ -116,11 +120,13 @@ func initWlan() {
 		procWlanQueryInterface, procWlanGetProfile, procWlanFreeMemory,
 	} {
 		if err := p.Find(); err != nil {
+			wlanInitErr = fmt.Errorf("resolving wlanapi.dll proc %s: %w", p.Name, err)
 			return
 		}
 	}
 	h, err := openWlanHandle()
 	if err != nil {
+		wlanInitErr = fmt.Errorf("opening WLAN client handle: %w", err)
 		return
 	}
 	wlanHandle = h
@@ -157,8 +163,12 @@ func newBackend() Dot1XBackend {
 type unavailableBackend struct{}
 
 func (unavailableBackend) GetStatus(ifname string) (Dot1XStatus, error) {
+	if wlanInitErr != nil {
+		return Dot1XStatus{Interface: ifname},
+			fmt.Errorf("%w: Windows WLAN backend unavailable: %w", ErrBackendUnavailable, wlanInitErr)
+	}
 	return Dot1XStatus{Interface: ifname},
-		fmt.Errorf("%w: wlanapi.dll not available on this system", ErrBackendUnavailable)
+		fmt.Errorf("%w: Windows WLAN backend unavailable", ErrBackendUnavailable)
 }
 
 func openWlanHandle() (uintptr, error) {
