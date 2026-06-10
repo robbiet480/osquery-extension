@@ -84,7 +84,10 @@ type wlanConnectionAttributes struct {
 }
 
 var (
-	modWlanapi = syscall.NewLazyDLL("wlanapi.dll")
+	// NewLazySystemDLL (not NewLazyDLL) forces loading from the Windows system
+	// directory, avoiding DLL search-order hijacking if the process runs from a
+	// writable location.
+	modWlanapi = windows.NewLazySystemDLL("wlanapi.dll")
 
 	procWlanOpenHandle     = modWlanapi.NewProc("WlanOpenHandle")
 	procWlanEnumInterfaces = modWlanapi.NewProc("WlanEnumInterfaces")
@@ -108,7 +111,7 @@ func initWlan() {
 	if err := modWlanapi.Load(); err != nil {
 		return
 	}
-	for _, p := range []*syscall.LazyProc{
+	for _, p := range []*windows.LazyProc{
 		procWlanOpenHandle, procWlanEnumInterfaces,
 		procWlanQueryInterface, procWlanGetProfile, procWlanFreeMemory,
 	} {
@@ -132,12 +135,14 @@ type ifaceInfo struct {
 }
 
 // windowsBackend reuses the process-lifetime WLAN handle and, on first use,
-// snapshots all interfaces into ifaces so that querying several interfaces in
-// one table generation enumerates only once instead of once per interface.
+// snapshots all interfaces (both the description->info map and the ordered
+// names) so one table generation enumerates only once — shared between the
+// default interface list and every GetStatus.
 type windowsBackend struct {
 	handle  uintptr
 	once    sync.Once
 	ifaces  map[string]ifaceInfo
+	names   []string
 	enumErr error
 }
 
@@ -241,16 +246,29 @@ func defaultInterfaces() []string {
 }
 
 // snapshot lazily enumerates interfaces once per backend instance (i.e. once
-// per table generation) and caches the result.
-func (b *windowsBackend) snapshot() (map[string]ifaceInfo, error) {
+// per table generation) and caches both the info map and ordered names.
+func (b *windowsBackend) snapshot() (map[string]ifaceInfo, []string, error) {
 	b.once.Do(func() {
-		b.ifaces, _, b.enumErr = enumerateWlanInterfaceInfos(b.handle)
+		b.ifaces, b.names, b.enumErr = enumerateWlanInterfaceInfos(b.handle)
 	})
-	return b.ifaces, b.enumErr
+	return b.ifaces, b.names, b.enumErr
+}
+
+// interfaceNames satisfies the shared interfaceLister optional interface so the
+// default interface list for an unconstrained query is sourced from the same
+// snapshot GetStatus uses, avoiding a second WlanEnumInterfaces call. Returns
+// nil when WLAN is unavailable / enumeration failed (caller's generic
+// fallback), or a possibly-empty slice of adapter names otherwise.
+func (b *windowsBackend) interfaceNames() []string {
+	_, names, err := b.snapshot()
+	if err != nil {
+		return nil
+	}
+	return names
 }
 
 func (b *windowsBackend) GetStatus(ifname string) (Dot1XStatus, error) {
-	infos, err := b.snapshot()
+	infos, _, err := b.snapshot()
 	if err != nil {
 		// Enumeration failing is systemic (affects every interface), so report
 		// it as backend-unavailable rather than a per-interface miss. Both are
@@ -339,8 +357,12 @@ func (b *windowsBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 			if innerType := extractInnerEAPTypeFromXML(xmlStr); innerType > 0 {
 				s.InnerEAPType = innerType
 			}
+			// These are the configured trusted root CA thumbprints (server
+			// validation), not the presented server certificate's fingerprint,
+			// so they go in TLSTrustedRootCASHA1 rather than
+			// TLSServerCertificateSHA1 (which macOS fills with the actual chain).
 			if sha1 := extractTrustedRootCAFromXML(xmlStr); sha1 != "" {
-				s.TLSServerCertificateSHA1 = sha1
+				s.TLSTrustedRootCASHA1 = sha1
 			}
 		}
 	}

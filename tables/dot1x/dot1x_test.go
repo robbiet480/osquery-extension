@@ -48,6 +48,7 @@ func TestDot1XStatusColumns(t *testing.T) {
 		"tls_server_certificate_chain",
 		"tls_server_certificate_sha1",
 		"tls_server_certificate_serials",
+		"tls_trusted_root_ca_sha1",
 		"tls_trust_client_status",
 		"tls_negotiated_protocol_version",
 		"tls_negotiated_cipher",
@@ -69,7 +70,7 @@ func TestInterfacesToQuery(t *testing.T) {
 	t.Run("no constraint returns default interfaces", func(t *testing.T) {
 		t.Parallel()
 		qc := table.QueryContext{}
-		ifaces := interfacesToQuery(qc)
+		ifaces := interfacesToQuery(fakeBackend{}, qc)
 		// A non-nil platform default (incl. an empty slice, e.g. Windows with
 		// no WLAN adapters) is authoritative; only a nil default falls back to
 		// the generic en0-en9 probe list.
@@ -93,7 +94,7 @@ func TestInterfacesToQuery(t *testing.T) {
 				},
 			},
 		}
-		ifaces := interfacesToQuery(qc)
+		ifaces := interfacesToQuery(fakeBackend{}, qc)
 		assert.Equal(t, []string{"en0"}, ifaces)
 	})
 
@@ -110,7 +111,7 @@ func TestInterfacesToQuery(t *testing.T) {
 		}
 		// LIKE is not exact-match, so it falls back to the same platform
 		// defaults an unconstrained query would use.
-		assert.Equal(t, interfacesToQuery(table.QueryContext{}), interfacesToQuery(qc))
+		assert.Equal(t, interfacesToQuery(fakeBackend{}, table.QueryContext{}), interfacesToQuery(fakeBackend{}, qc))
 	})
 
 	t.Run("duplicate constraints deduplicated", func(t *testing.T) {
@@ -126,7 +127,7 @@ func TestInterfacesToQuery(t *testing.T) {
 				},
 			},
 		}
-		ifaces := interfacesToQuery(qc)
+		ifaces := interfacesToQuery(fakeBackend{}, qc)
 		assert.Equal(t, []string{"en0", "en1"}, ifaces)
 	})
 }

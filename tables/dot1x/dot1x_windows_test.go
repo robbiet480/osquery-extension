@@ -157,10 +157,10 @@ func TestWindowsMockBackendConnected(t *testing.T) {
 				SupplicantState:          4,
 				EAPType:                  13,
 				ClientStatus:             0,
-				AuthenticatorMACAddress:  "26:0b:8b:00:f2:34",
-				Mode:                     3,
-				TLSServerCertificateSHA1: "23:a6:b1:0a:be:8a:4a:37:72:11:e2:f4:2c:36:67:f1:36:e9:08:bf",
-				UniqueIdentifier:         "{9A82D898-7B57-40AA-A330-E2B99D10BD77}",
+				AuthenticatorMACAddress: "26:0b:8b:00:f2:34",
+				Mode:                    3,
+				TLSTrustedRootCASHA1:    "23:a6:b1:0a:be:8a:4a:37:72:11:e2:f4:2c:36:67:f1:36:e9:08:bf",
+				UniqueIdentifier:        "{9A82D898-7B57-40AA-A330-E2B99D10BD77}",
 				DomainSpecificError:      -1,
 				TLSTrustClientStatus:     -1,
 				TLSNegotiatedCipher:      -1,
@@ -186,7 +186,10 @@ func TestWindowsMockBackendConnected(t *testing.T) {
 	assert.Equal(t, "26:0b:8b:00:f2:34", row["authenticator_mac_address"])
 	assert.Equal(t, "3", row["mode"])
 	assert.Equal(t, "System", row["mode_name"])
-	assert.Equal(t, "23:a6:b1:0a:be:8a:4a:37:72:11:e2:f4:2c:36:67:f1:36:e9:08:bf", row["tls_server_certificate_sha1"])
+	// Windows surfaces the configured trusted-root-CA thumbprints, not the
+	// presented server cert fingerprint, so they land in tls_trusted_root_ca_sha1.
+	assert.Equal(t, "23:a6:b1:0a:be:8a:4a:37:72:11:e2:f4:2c:36:67:f1:36:e9:08:bf", row["tls_trusted_root_ca_sha1"])
+	assert.Equal(t, "", row["tls_server_certificate_sha1"])
 	assert.Equal(t, "{9A82D898-7B57-40AA-A330-E2B99D10BD77}", row["unique_identifier"])
 	assert.Equal(t, "", row["domain_specific_error"])
 	assert.Equal(t, "", row["tls_trust_client_status"])

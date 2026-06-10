@@ -31,6 +31,7 @@ type Dot1XStatus struct {
 	TLSServerCertificateChain    string // pipe-separated subject DNs in LDAP notation
 	TLSServerCertificateSHA1     string // comma-separated colon-separated SHA-1 fingerprints
 	TLSServerCertificateSerials  string // comma-separated hex serial numbers
+	TLSTrustedRootCASHA1         string // comma-separated SHA-1 thumbprints of the trusted root CAs configured for server validation (Windows profile)
 	TLSTrustClientStatus         int    // trust evaluation error code (0=ok)
 	TLSNegotiatedProtocolVersion string // "1.2" or "1.3"
 	TLSNegotiatedCipher          int    // TLS cipher suite code
@@ -124,6 +125,7 @@ func Dot1XStatusColumns() []table.ColumnDefinition {
 		table.TextColumn("tls_server_certificate_chain"),
 		table.TextColumn("tls_server_certificate_sha1"),
 		table.TextColumn("tls_server_certificate_serials"),
+		table.TextColumn("tls_trusted_root_ca_sha1"),
 		table.IntegerColumn("tls_trust_client_status"),
 		table.TextColumn("tls_negotiated_protocol_version"),
 		table.IntegerColumn("tls_negotiated_cipher"),
@@ -144,7 +146,7 @@ func Dot1XStatusGenerate(ctx context.Context, queryContext table.QueryContext) (
 // otherwise en0 through en9 are probed. The context is checked before each
 // backend call to support cancellation.
 func generateRows(ctx context.Context, backend Dot1XBackend, queryContext table.QueryContext) ([]map[string]string, error) {
-	ifaces := interfacesToQuery(queryContext)
+	ifaces := interfacesToQuery(backend, queryContext)
 	var rows []map[string]string
 
 	for _, ifname := range ifaces {
@@ -164,11 +166,18 @@ func generateRows(ctx context.Context, backend Dot1XBackend, queryContext table.
 	return rows, nil
 }
 
+// interfaceLister is an optional backend capability: a backend that already
+// enumerates interfaces (e.g. the Windows WLAN backend) can supply the default
+// interface list from its own cached snapshot, avoiding a second enumeration.
+type interfaceLister interface {
+	interfaceNames() []string
+}
+
 // interfacesToQuery returns the list of interfaces to query. If a WHERE
 // constraint "interface" is present, only that interface is returned;
 // otherwise the platform-specific default list is used (e.g. real
 // wireless adapter names on Windows, en0-en9 on macOS).
-func interfacesToQuery(queryContext table.QueryContext) []string {
+func interfacesToQuery(backend Dot1XBackend, queryContext table.QueryContext) []string {
 	if constraints, ok := queryContext.Constraints["interface"]; ok {
 		seen := make(map[string]struct{})
 		var ifaces []string
@@ -186,12 +195,18 @@ func interfacesToQuery(queryContext table.QueryContext) []string {
 		}
 	}
 
-	// A non-nil result from defaultInterfaces() is authoritative, even when
-	// empty: e.g. a Windows host with no WLAN adapters returns an empty slice
-	// (query nothing) rather than falling through to the macOS-style en0-en9
-	// probe list. Only a nil result (defaults unknown) uses that fallback.
-	if ifaces := defaultInterfaces(); ifaces != nil {
-		return ifaces
+	// Prefer the backend's own enumeration when it provides one (the Windows
+	// backend shares its per-generation snapshot), otherwise the package
+	// default. A non-nil result is authoritative even when empty: a Windows
+	// host with no WLAN adapters returns an empty slice (query nothing) rather
+	// than falling through to the macOS-style en0-en9 probe list. Only a nil
+	// result (defaults unknown) uses that fallback.
+	defaults := defaultInterfaces()
+	if l, ok := backend.(interfaceLister); ok {
+		defaults = l.interfaceNames()
+	}
+	if defaults != nil {
+		return defaults
 	}
 	fallback := make([]string, 10)
 	for i := range fallback {
@@ -217,6 +232,7 @@ func rowFromStatus(s Dot1XStatus) map[string]string {
 		"tls_server_certificate_chain":    s.TLSServerCertificateChain,
 		"tls_server_certificate_sha1":     s.TLSServerCertificateSHA1,
 		"tls_server_certificate_serials":  s.TLSServerCertificateSerials,
+		"tls_trusted_root_ca_sha1":        s.TLSTrustedRootCASHA1,
 		"tls_trust_client_status":         itoa(s.TLSTrustClientStatus),
 		"tls_negotiated_protocol_version": s.TLSNegotiatedProtocolVersion,
 		"tls_negotiated_cipher":           itoa(s.TLSNegotiatedCipher),
