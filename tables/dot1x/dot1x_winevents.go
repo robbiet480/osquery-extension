@@ -125,9 +125,11 @@ func eventMAC(s string) string {
 	return macAddrString(b)
 }
 
-// applyFailure copies an 802.1X failure event (15514 / 12013) into s.
+// applyFailure copies an 802.1X failure event (15514 / 12013) into s and
+// marks it Failed (EAPClientStatus 1) so client_status_name matches macOS.
 func applyFailure(s *Dot1XStatus, e winEvent) {
-	s.FailureReason = e.Data["ReasonText"]
+	s.ClientStatus = 1
+	s.FailureReason = oneLine(e.Data["ReasonText"])
 	s.FailureCode = e.Data["ReasonCode"]
 	mac := e.Data["SwitchMAC"]
 	if mac == "" {
@@ -304,4 +306,17 @@ func decodeProfileBytes(b []byte) string {
 		u[i] = order.Uint16(b[2+2*i:])
 	}
 	return string(utf16.Decode(u))
+}
+
+// oneLine joins a multi-line event message into one line. Windows ReasonText
+// can contain real line breaks and literal "\n" sequences.
+func oneLine(s string) string {
+	s = strings.ReplaceAll(s, `\n`, "\n")
+	var parts []string
+	for _, l := range strings.Split(s, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			parts = append(parts, l)
+		}
+	}
+	return strings.Join(parts, "; ")
 }

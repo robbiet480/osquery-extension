@@ -196,6 +196,7 @@ func TestWiredStatusFailure(t *testing.T) {
 	require.NoError(t, err)
 	want := wiredBase()
 	want.SupplicantState = 5 // Held
+	want.ClientStatus = 1    // Failed
 	want.FailureReason = "Unable to identify a user for 802.1X authentication"
 	want.FailureCode = "0x50001"
 	want.LastStatusTimestamp = "2026-10-03T07:40:42Z"
@@ -220,6 +221,7 @@ func TestWiredStatusSuspended(t *testing.T) {
 	require.NoError(t, err)
 	want := wiredBase()
 	want.SupplicantState = 5 // Held
+	want.ClientStatus = 1    // Failed
 	want.FailureReason = "Unable to identify a user for 802.1X authentication"
 	want.FailureCode = "0x50001"
 	want.LastStatusTimestamp = "2026-10-03T07:40:42Z"
@@ -337,7 +339,7 @@ func TestWlanStatusIdleFailureRow(t *testing.T) {
 		State:                   0, // Idle
 		SupplicantState:         5, // Held
 		EAPType:                 -1,
-		ClientStatus:            -1,
+		ClientStatus:            1, // Failed
 		AuthenticatorMACAddress: "2a:0b:8b:00:f2:34",
 		Mode:                    -1,
 		TLSSessionWasResumed:    -1,
@@ -538,4 +540,21 @@ func TestWindowsStatusWiredEventsError(t *testing.T) {
 	s, err := windowsStatus(w, d, testWiredIface)
 	require.NoError(t, err)
 	assert.Equal(t, wiredBase(), s)
+}
+
+// Observed live (wired reject on Windows 11 25H2): ReasonText can contain
+// both a literal "\n" and real line breaks. Failures also set client_status
+// to Failed (1) so client_status_name = 'Failed' matches on both platforms.
+func TestApplyFailureNormalizes(t *testing.T) {
+	t.Parallel()
+
+	var s Dot1XStatus
+	applyFailure(&s, winEvent{ID: 15514, Data: map[string]string{
+		"ReasonText": "Network authentication failed\\nWindows doesn't have the required authentication method to connect to this network.\r\n",
+		"ReasonCode": "0x50005",
+	}})
+	assert.Equal(t, "Network authentication failed; Windows doesn't have the required authentication method to connect to this network.", s.FailureReason)
+	assert.Equal(t, "0x50005", s.FailureCode)
+	assert.Equal(t, 1, s.ClientStatus)
+	assert.Equal(t, "Failed", rowFromStatus(s)["client_status_name"])
 }
