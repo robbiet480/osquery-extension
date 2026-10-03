@@ -99,6 +99,35 @@ var eapTypeNames = map[int]string{
 	50: "EAP-AKA-Prime",
 }
 
+// clientStatusNames maps EAPClientStatus (eap8021x EAPClientTypes.h) to
+// names. Windows only ever reports 0 (connected).
+var clientStatusNames = map[int]string{
+	0:    "OK",
+	1:    "Failed",
+	2:    "AllocationFailed",
+	3:    "UserInputRequired",
+	4:    "ConfigurationInvalid",
+	5:    "ProtocolNotSupported",
+	6:    "ServerCertificateNotTrusted",
+	7:    "InnerProtocolNotSupported",
+	8:    "InternalError",
+	9:    "UserCancelledAuthentication",
+	10:   "UnknownRootCertificate",
+	11:   "NoRootCertificate",
+	12:   "CertificateExpired",
+	13:   "CertificateNotYetValid",
+	14:   "CertificateRequiresConfirmation",
+	15:   "UserInputNotPossible",
+	16:   "ResourceUnavailable",
+	17:   "ProtocolError",
+	18:   "AuthenticationStalled",
+	19:   "IdentityDecryptionError",
+	20:   "OtherInputRequired",
+	1000: "ErrnoError",
+	1001: "SecurityError",
+	1002: "PluginSpecificError",
+}
+
 // modeNames maps EAPOLControlMode to human-readable strings.
 var modeNames = map[int]string{
 	0: "None",
@@ -123,6 +152,7 @@ func Dot1XStatusColumns() []table.ColumnDefinition {
 		table.IntegerColumn("eap_type"),
 		table.TextColumn("eap_type_name"),
 		table.IntegerColumn("client_status"),
+		table.TextColumn("client_status_name"),
 		table.IntegerColumn("domain_specific_error"),
 		table.TextColumn("authenticator_mac_address"),
 		table.IntegerColumn("mode"),
@@ -241,6 +271,7 @@ func rowFromStatus(s Dot1XStatus) map[string]string {
 		"eap_type":                        itoa(s.EAPType),
 		"eap_type_name":                   "",
 		"client_status":                   itoa(s.ClientStatus),
+		"client_status_name":              lookupName(clientStatusNames, s.ClientStatus),
 		"domain_specific_error":           optItoa(s.DomainSpecificError),
 		"authenticator_mac_address":       s.AuthenticatorMACAddress,
 		"mode":                            itoa(s.Mode),

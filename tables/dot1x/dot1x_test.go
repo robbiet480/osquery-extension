@@ -54,7 +54,7 @@ func TestDot1XStatusColumns(t *testing.T) {
 		"interface", "state", "state_name",
 		"supplicant_state", "supplicant_state_name",
 		"eap_type", "eap_type_name",
-		"client_status", "domain_specific_error",
+		"client_status", "client_status_name", "domain_specific_error",
 		"authenticator_mac_address",
 		"mode", "mode_name",
 		"tls_session_was_resumed",
@@ -725,3 +725,27 @@ func TestRowFromStatusDomainSpecificError(t *testing.T) {
 }
 
 func intPtr(v int) *int { return &v }
+
+// client_status_name maps Apple's public EAPClientStatus enum
+// (EAPClientTypes.h); values observed live in failure testing included
+// 1 (wrong password) and 3 (credential re-prompt / server trust prompt).
+func TestRowFromStatusClientStatusName(t *testing.T) {
+	t.Parallel()
+
+	for status, want := range map[int]string{
+		-1:   "",
+		0:    "OK",
+		1:    "Failed",
+		3:    "UserInputRequired",
+		6:    "ServerCertificateNotTrusted",
+		10:   "UnknownRootCertificate",
+		12:   "CertificateExpired",
+		20:   "OtherInputRequired",
+		1000: "ErrnoError",
+		1001: "SecurityError",
+		1002: "PluginSpecificError",
+		999:  "Unknown(999)",
+	} {
+		assert.Equal(t, want, rowFromStatus(Dot1XStatus{ClientStatus: status})["client_status_name"], "status %d", status)
+	}
+}
