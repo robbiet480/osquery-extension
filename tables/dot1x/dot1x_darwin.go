@@ -377,6 +377,30 @@ func newBackend() Dot1XBackend {
 // osqueryd; anywhere else the ssid column stays empty.
 const knownNetworksPlist = "/Library/Preferences/com.apple.wifi.known-networks.plist"
 
+// eapolClientConfigPlist is eap8021x's EAPOLClientConfiguration store
+// (world-readable).
+const eapolClientConfigPlist = "/Library/Preferences/SystemConfiguration/com.apple.network.eapolclient.configuration.plist"
+
+// darwinSSID resolves the SSID of a Wi-Fi 802.1X session, which the EAPOL
+// status doesn't carry: first exactly from the session's EAPOLClientProfile
+// (profile-based / MDM networks report its ID as UniqueIdentifier), then by
+// matching the BSSID against known networks (root + Full Disk Access).
+func darwinSSID(s Dot1XStatus) string {
+	if s.UniqueIdentifier != "" {
+		if b, err := os.ReadFile(eapolClientConfigPlist); err == nil {
+			if ssid := profileSSID(b, s.UniqueIdentifier); ssid != "" {
+				return ssid
+			}
+		}
+	}
+	if s.AuthenticatorMACAddress != "" {
+		if b, err := os.ReadFile(knownNetworksPlist); err == nil {
+			return knownNetworkSSID(b, s.AuthenticatorMACAddress)
+		}
+	}
+	return ""
+}
+
 func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 	cName := C.CString(ifname)
 	defer C.free(unsafe.Pointer(cName))
@@ -473,11 +497,8 @@ func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 	}
 
 	s, err := statusFromEAPOL(ifname, r)
-	if err == nil && s.InterfaceType == "wifi" && s.AuthenticatorMACAddress != "" {
-		// Needs root + Full Disk Access (osqueryd); otherwise ssid stays empty.
-		if b, rerr := os.ReadFile(knownNetworksPlist); rerr == nil {
-			s.SSID = knownNetworkSSID(b, s.AuthenticatorMACAddress)
-		}
+	if err == nil && s.InterfaceType == "wifi" {
+		s.SSID = darwinSSID(s)
 	}
 	return s, err
 }

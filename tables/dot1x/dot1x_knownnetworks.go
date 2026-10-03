@@ -58,3 +58,28 @@ func padMAC(s string) string {
 	}
 	return strings.Join(parts, ":")
 }
+
+// profileSSID returns the SSID bound to an EAPOLClientProfile in eap8021x's
+// client configuration (Profiles -> <ProfileID> -> WLAN -> SSID). A
+// profile-based session (typically MDM-deployed) reports that ProfileID as
+// its UniqueIdentifier, so this identifies the network exactly. Returns ""
+// for unknown profiles, profiles without a WLAN binding, or bad input.
+func profileSSID(plistData []byte, profileID string) string {
+	if profileID == "" || len(plistData) == 0 {
+		return ""
+	}
+	var cfg map[string]any
+	if plist.Unmarshal(plistData, &cfg) != nil {
+		return ""
+	}
+	profiles, _ := cfg["Profiles"].(map[string]any)
+	profile, _ := profiles[profileID].(map[string]any)
+	wlan, _ := profile["WLAN"].(map[string]any)
+	switch ssid := wlan["SSID"].(type) {
+	case []byte:
+		return string(ssid)
+	case string:
+		return ssid
+	}
+	return ""
+}

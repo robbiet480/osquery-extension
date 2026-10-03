@@ -796,3 +796,17 @@ func TestKnownNetworkSSID(t *testing.T) {
 	assert.Equal(t, "", knownNetworkSSID([]byte("not a plist"), "2a:0b:8b:00:f2:35"))
 	assert.Equal(t, "", knownNetworkSSID(nil, "2a:0b:8b:00:f2:35"), "plist unreadable (no root/FDA)")
 }
+
+// macOS profile-based 802.1X sessions report the EAPOLClientProfile ID as
+// unique_identifier; that profile's WLAN binding gives the SSID exactly, from
+// a world-readable file (no root/FDA needed).
+func TestProfileSSID(t *testing.T) {
+	t.Parallel()
+	b := []byte(readTestdata(t, "eapolclient-configuration.plist"))
+
+	assert.Equal(t, "CorpWiFi", profileSSID(b, "11111111-2222-3333-4444-555555555555"))
+	assert.Equal(t, "", profileSSID(b, "66666666-7777-8888-9999-000000000000"), "profile without WLAN binding")
+	assert.Equal(t, "", profileSSID(b, "deadbeef-0000-0000-0000-000000000000"), "unknown profile")
+	assert.Equal(t, "", profileSSID(b, ""), "not a profile-based session")
+	assert.Equal(t, "", profileSSID([]byte("junk"), "11111111-2222-3333-4444-555555555555"))
+}
