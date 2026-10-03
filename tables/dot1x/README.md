@@ -85,6 +85,22 @@ Which TLS fields appear depends on the EAP method:
 | EAP-TLS | ✓ | empty: eap8021x's default BoringSSL path doesn't publish it ([`/* TBD */`](https://github.com/apple-oss-distributions/eap8021x/blob/eap8021x-368.120.2.0.1/EAP8021X.fproj/EAPTLSSession.c)) |
 | PEAP / TTLS / EAP-FAST | empty | ✓ (Secure Transport `SSLGetNegotiatedCipher`) |
 
+Only the EAP-TLS plugin records the protocol version. The PEAP, TTLS and EAP-FAST plugins run on Secure Transport and never publish it. For those methods the cipher usually implies it:
+
+- TLS 1.3 suites (`4865`–`4869`, i.e. `0x1301`–`0x1305`) exist only in TLS 1.3.
+- AEAD suites (AES-GCM and ChaCha20-Poly1305, e.g. `49199`/`49200` = `0xC02F`/`0xC030` ECDHE-RSA-AES-GCM) exist only in TLS 1.2.
+- CBC suites are valid in TLS 1.0–1.2, so the version can't be told from them.
+
+```sql
+SELECT interface, eap_type_name, tls_negotiated_cipher,
+       CASE
+         WHEN tls_negotiated_protocol_version != '' THEN tls_negotiated_protocol_version
+         WHEN tls_negotiated_cipher BETWEEN 4865 AND 4869 THEN '1.3 (from cipher)'
+         WHEN tls_negotiated_cipher IN (156, 157, 158, 159, 49195, 49196, 49199, 49200, 52392, 52393, 52394) THEN '1.2 (from cipher)'
+       END AS tls_version
+FROM dot1x;
+```
+
 ### Windows
 
 Pure Go (no cgo):
