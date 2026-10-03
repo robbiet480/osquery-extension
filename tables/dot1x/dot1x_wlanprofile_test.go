@@ -373,6 +373,42 @@ func peapXML(outerSV, peapExt, innerSV, innerExtra string) string {
 
 const testCA = `<TrustedRootCA>58 34 c1 13 14 9c fc 9b 9f 28 70 6f db e6 81 a4 78 19 a2 0e</TrustedRootCA>`
 
+func TestParseWLANProfileExcludesInnerCAs(t *testing.T) {
+	t.Parallel()
+	outerNames := `<ServerNames>radius.campus.edu</ServerNames>`
+	for name, xml := range map[string]string{
+		"PEAP": peapXML(outerNames, "", testCA, ""),
+		"TTLS": `<OneX><EapTtls><ServerValidation>` + outerNames +
+			`</ServerValidation><Phase2Authentication><EapHostConfig><Config>` +
+			`<Eap><Type>13</Type><EapType><ServerValidation>` + testCA +
+			`</ServerValidation></EapType></Eap></Config></EapHostConfig></Phase2Authentication></EapTtls></OneX>`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			info := parseWLANProfile(xml)
+			assert.Empty(t, info.trustedRootCASHA1)
+			assert.Equal(t, "name_only", info.serverValidation)
+		})
+	}
+}
+
+func TestParseProfileOneXDefaults(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, xml string
+		want      bool
+	}{
+		{"LAN omitted", `<LANProfile><MSM><security/></MSM></LANProfile>`, true},
+		{"LAN explicitly disabled", `<LANProfile><MSM><security><OneXEnabled>false</OneXEnabled></security></MSM></LANProfile>`, false},
+		{"LAN numeric disabled", `<LANProfile><MSM><security><OneXEnabled>0</OneXEnabled></security></MSM></LANProfile>`, false},
+		{"WLAN omitted", `<WLANProfile><MSM><security/></MSM></WLANProfile>`, false},
+		{"empty", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, parseWLANProfile(tc.xml).useOneX)
+		})
+	}
+}
+
 // Server names and the server validation summary come from the OUTER
 // method's ServerValidation (PEAP/EAP-TLS) or EapTtls ServerValidation (TTLS),
 // plus the V2 PerformServerValidation / AcceptServerName switches.

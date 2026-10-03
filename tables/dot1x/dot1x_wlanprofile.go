@@ -23,7 +23,7 @@ type wlanProfileInfo struct {
 	// in the profile), comma-joined.
 	trustedServerNames string
 	serverValidation   string // see serverValidation; "" for a non-802.1X profile
-	useOneX            bool   // <useOneX> (WLAN) or <OneXEnabled> (LAN) is true: the profile is 802.1X
+	useOneX            bool   // <useOneX> (WLAN) or <OneXEnabled> (LAN); defaults to true for LAN
 }
 
 // parseWLANProfile extracts every 802.1X field from a WLAN profile XML in a
@@ -33,8 +33,8 @@ type wlanProfileInfo struct {
 // <Type> of an <Eap> nested inside another <Eap> (PEAP:
 // Config/Eap/EapType/Eap/Type) or the <Type> inside a second <EapMethod>
 // (EAP-TTLS nests a full EapHostConfig under Phase2Authentication); authMode is the first
-// <authMode>; trusted root CA thumbprints are every valid 40-hex-char
-// <TrustedRootCA> (comma-joined).
+// <authMode>; trusted root CA thumbprints are the outer method's valid
+// <TrustedRootCA> / <TrustedRootCAHash> values (comma-joined).
 //
 // Server validation settings are read from the outer method only (Eap depth
 // <= 1: EAP-TLS/PEAP Config/Eap/EapType, or TTLS EapTtls outside
@@ -78,6 +78,10 @@ func parseWLANProfile(xmlStr string) wlanProfileInfo {
 		}
 		outer := eapDepth <= 1 && !inPhase2 // see doc: outer method's settings only
 		switch se.Name.Local {
+		case "LANProfile":
+			// OneXEnabled is optional and defaults to true for LAN profiles.
+			// An explicit value below overrides this; WLAN keeps its false default.
+			info.useOneX = true
 		case "Phase2Authentication":
 			inPhase2 = true
 		case "Eap":
@@ -141,7 +145,7 @@ func parseWLANProfile(xmlStr string) wlanProfileInfo {
 				}
 			}
 		case "TrustedRootCA", "TrustedRootCAHash": // PEAP/EAP-TLS, EAP-TTLS
-			if s, ok := readCharData(dec); ok {
+			if s, ok := readCharData(dec); ok && outer {
 				if hex, ok := normalizeThumbprint(s); ok {
 					caHashes = append(caHashes, formatSHA1Hex(hex))
 				}

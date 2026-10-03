@@ -7,6 +7,7 @@ package dot1x
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 	"unicode/utf16"
@@ -340,6 +341,17 @@ func TestWiredStatusNotDot1X(t *testing.T) {
 		_, err := wiredStatus(w, []winEvent{loadEvent(t, "wired-15505")})
 		assert.ErrorIs(t, err, errNotDot1X)
 	}
+}
+
+func TestWiredStatusDefaultOneXEnabled(t *testing.T) {
+	t.Parallel()
+	w := testWired(t)
+	w.profileXML = strings.Replace(w.profileXML, "<OneXEnabled>true</OneXEnabled>", "", 1)
+	require.NotContains(t, w.profileXML, "OneXEnabled")
+	s, err := wiredStatus(w, []winEvent{loadEvent(t, "wired-15505")})
+	require.NoError(t, err)
+	assert.Equal(t, 4, s.SupplicantState)
+	assert.Equal(t, 13, s.EAPType)
 }
 
 // --- WLAN events ---

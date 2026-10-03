@@ -5,6 +5,7 @@ import (
 	"crypto/sha1" //nolint:gosec // sha1 used only for certificate fingerprint display
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -432,10 +433,14 @@ func parseTLSCertChain(packed []byte) (subjects, sha1s, serials, leafNotAfter st
 		if err != nil {
 			continue
 		}
+		var subject pkix.RDNSequence
+		if rest, err := asn1.Unmarshal(cert.RawSubject, &subject); err != nil || len(rest) != 0 {
+			continue
+		}
 		if len(dnParts) == 0 {
 			leafNotAfter = cert.NotAfter.UTC().Format("2006-01-02T15:04:05Z")
 		}
-		dnParts = append(dnParts, renderRDNSequence(reverseRDNSequence(cert.Subject.ToRDNSequence())))
+		dnParts = append(dnParts, renderRDNSequence(reverseRDNSequence(subject)))
 		sha1Parts = append(sha1Parts, sha1String(sha1.Sum(cert.Raw)))
 		serialParts = append(serialParts, cert.SerialNumber.Text(16))
 	}
@@ -445,7 +450,7 @@ func parseTLSCertChain(packed []byte) (subjects, sha1s, serials, leafNotAfter st
 // renderRDNSequence converts an x509 RDN sequence to LDAP notation
 // (e.g. "CN=radius.campus.edu,OU=IT,O=Campus"). The input should be in
 // display order (most-specific first). Use reverseRDNSequence to convert
-// from cert.Subject.ToRDNSequence() which returns least-specific first.
+// from the certificate's raw subject, which is encoded least-specific first.
 func renderRDNSequence(rdns pkix.RDNSequence) string {
 	var parts []string
 	for _, rdn := range rdns {
@@ -553,7 +558,7 @@ func escapeDN(s string) string {
 }
 
 // reverseRDNSequence returns a new RDNSequence in reverse order.
-// cert.Subject.ToRDNSequence() returns least-specific-first (C,O,OU,CN);
+// A certificate's raw subject is encoded least-specific-first (C,O,OU,CN);
 // this produces display order (CN,OU,O,C).
 func reverseRDNSequence(rdns pkix.RDNSequence) pkix.RDNSequence {
 	if len(rdns) == 0 {

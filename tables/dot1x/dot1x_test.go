@@ -608,6 +608,35 @@ func TestParseTLSCertChain(t *testing.T) {
 	})
 }
 
+func TestParseTLSCertChainPreservesSubject(t *testing.T) {
+	// Domain components and multi-valued RDNs must survive parsing the DER,
+	// not just direct calls to the renderer.
+	rawSubject, err := asn1.Marshal(pkix.RDNSequence{
+		{{Type: asn1.ObjectIdentifier{0, 9, 2342, 19200300, 100, 1, 25}, Value: "edu"}},
+		{{Type: asn1.ObjectIdentifier{0, 9, 2342, 19200300, 100, 1, 25}, Value: "campus"}},
+		{
+			{Type: asn1.ObjectIdentifier{2, 5, 4, 3}, Value: "a"},
+			{Type: asn1.ObjectIdentifier{2, 5, 4, 10}, Value: "b"},
+		},
+	})
+	require.NoError(t, err)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	cert := &x509.Certificate{
+		SerialNumber: big.NewInt(42),
+		RawSubject:   rawSubject,
+		NotBefore:    time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		NotAfter:     time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, cert, cert, &key.PublicKey, key)
+	require.NoError(t, err)
+	subject, fingerprint, serial, expiry := parseTLSCertChain(packCerts(der))
+	assert.Equal(t, "CN=a+O=b,0.9.2342.19200300.100.1.25=campus,0.9.2342.19200300.100.1.25=edu", subject)
+	assert.NotEmpty(t, fingerprint)
+	assert.Equal(t, "2a", serial)
+	assert.Equal(t, "2027-01-01T00:00:00Z", expiry)
+}
+
 func TestRenderRDNSequence(t *testing.T) {
 	t.Parallel()
 
