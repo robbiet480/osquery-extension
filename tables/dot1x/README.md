@@ -19,15 +19,15 @@ WHERE supplicant_state_name != 'Authenticated';
 | `ssid` | TEXT | Wi-Fi network name (see [SSID on macOS](#ssid-on-macos)) | ✓ Wi-Fi | ✓ Wi-Fi |
 | `profile_name` | TEXT | Name of the configuration behind the connection. macOS: the EAPOLClientProfile name, i.e. the 802.1X payload's `PayloadDisplayName`, or `WiFi (<SSID>)` when the payload has none (not the configuration profile's own name; use `mdm_payload_uuid` for that). Windows: the WLAN profile name (MDM-pushed or hand-joined, usually the SSID) | ✓ profile-based | ✓ Wi-Fi |
 | `mdm_payload_uuid` | TEXT | `PayloadUUID` of the configuration-profile 802.1X payload (Wi-Fi or Ethernet) that installed the profile (see [Which MDM profile?](#which-mdm-profile-is-controlling-the-connection)) | ✓ | — |
-| `state` / `state_name` | INTEGER / TEXT | EAPOL control state: 0 Idle, 1 Starting, 2 Running, 3 Stopping | ✓ | ✓ |
-| `supplicant_state` / `supplicant_state_name` | INTEGER / TEXT | 0 Disconnected, 1 Connecting, 2 Acquired, 3 Authenticating, 4 Authenticated, 5 Held, 6 Logoff, 7 Inactive, 8 No Authenticator | ✓ | ✓ |
-| `eap_type` / `eap_type_name` | INTEGER / TEXT | Outer EAP method (13 EAP-TLS, 21 EAP-TTLS, 25 PEAP, …) | ✓ | ✓ |
-| `inner_eap_type` / `inner_eap_type_name` | INTEGER / TEXT | Inner EAP method for tunneled auth (e.g. 26 MSCHAPv2). Empty when the inner method isn't EAP (e.g. TTLS-PAP) | ✓ | ✓ |
-| `client_status` / `client_status_name` | INTEGER / TEXT | EAPClientStatus: `OK`, `Failed`, `UserInputRequired`, `ServerCertificateNotTrusted`, … Windows reports `OK`, or `Failed` for failure rows | ✓ | ✓ |
+| `state` / `state_name` | INTEGER / TEXT | EAPOL control state ([values](#state)) | ✓ | ✓ |
+| `supplicant_state` / `supplicant_state_name` | INTEGER / TEXT | 802.1X supplicant state machine ([values](#supplicant_state)) | ✓ | ✓ |
+| `eap_type` / `eap_type_name` | INTEGER / TEXT | Outer EAP method ([values](#eap_type--inner_eap_type)) | ✓ | ✓ |
+| `inner_eap_type` / `inner_eap_type_name` | INTEGER / TEXT | Inner EAP method for tunneled auth ([values](#eap_type--inner_eap_type)). Empty when the inner method isn't EAP (e.g. TTLS-PAP) | ✓ | ✓ |
+| `client_status` / `client_status_name` | INTEGER / TEXT | EAP client status ([values](#client_status)). Windows reports `OK`, or `Failed` for failure rows | ✓ | ✓ |
 | `failure_reason` / `failure_code` | TEXT | Last 802.1X failure from the Windows event log (`ReasonText` / `ReasonCode`, e.g. `Explicit Eap failure received` / `0x50005`) | — | ✓ |
 | `domain_specific_error` | INTEGER | EAP client domain-specific error; an Apple OSStatus, may be negative (e.g. `-9807`) | ✓ | — |
 | `authenticator_mac_address` | TEXT | Authenticator MAC: the AP's BSSID for Wi-Fi, the switch port's MAC for wired | ✓ | ✓ |
-| `mode` / `mode_name` | INTEGER / TEXT | 0 None, 1 User, 2 LoginWindow, 3 System; 4 MachineOrUser (Windows, also the default when a profile omits `authMode`) | ✓ | ✓ |
+| `mode` / `mode_name` | INTEGER / TEXT | Whose credentials authenticate the session ([values](#mode)) | ✓ | ✓ |
 | `tls_session_was_resumed` | INTEGER | 1/0; empty when unknown (always on Windows) | ✓ | — |
 | `tls_server_certificate_chain` | TEXT | Pipe-separated subject DNs (RFC 4514) of the server certificate chain | ✓ | — |
 | `tls_server_certificate_sha1` / `tls_server_certificate_serials` | TEXT | Comma-separated SHA-1 fingerprints / hex serials of that chain | ✓ | — |
@@ -39,6 +39,86 @@ WHERE supplicant_state_name != 'Authenticated';
 | `unique_identifier` | TEXT | macOS: eap8021x's EAPOLClientProfile ID (profile-based sessions only; a local ID, **not** an MDM UUID). Windows: interface GUID | ✓ | ✓ |
 
 Query a single interface with `WHERE interface = 'en0'` (macOS) or `WHERE interface = '<adapter description>'` (Windows). Otherwise every 802.1X-capable interface is checked: all `en*` interfaces on macOS, and Wi-Fi adapters plus wired adapters with a Wired AutoConfig profile on Windows.
+
+## Value reference
+
+### `state`
+
+- `0` Idle
+- `1` Starting
+- `2` Running
+- `3` Stopping
+
+### `supplicant_state`
+
+- `0` Disconnected
+- `1` Connecting
+- `2` Acquired: an authenticator responded; waiting for identity or credentials
+- `3` Authenticating
+- `4` Authenticated
+- `5` Held: the last attempt failed; waiting before retrying
+- `6` Logoff
+- `7` Inactive
+- `8` No Authenticator: nothing answered 802.1X on this link (e.g. the RADIUS server is unreachable, or the switch port isn't enforcing 802.1X)
+
+### `eap_type` / `inner_eap_type`
+
+- `1` Identity
+- `2` Notification
+- `3` Nak
+- `4` MD5-Challenge
+- `5` One-Time Password
+- `6` Generic Token Card
+- `13` EAP-TLS
+- `17` Cisco LEAP
+- `18` EAP-SIM
+- `19` SRP-SHA1
+- `21` EAP-TTLS
+- `23` EAP-AKA
+- `25` PEAP
+- `26` MSCHAPv2
+- `33` Extensions
+- `43` EAP-FAST
+- `50` EAP-AKA-Prime
+
+On macOS, `eap_type_name` / `inner_eap_type_name` are taken from macOS itself when it supplies them (e.g. `EAP-PEAP`, `EAP-TTLS`), so they can differ slightly from this list. Unlisted numbers show as `Unknown(<n>)`.
+
+### `client_status`
+
+These are eap8021x's `EAPClientStatus` values ([EAPClientTypes.h](https://github.com/apple-oss-distributions/eap8021x/blob/eap8021x-368.120.2.0.1/EAP8021X.fproj/EAPClientTypes.h)):
+
+- `0` OK
+- `1` Failed
+- `2` AllocationFailed
+- `3` UserInputRequired: waiting for credentials or a certificate-trust decision
+- `4` ConfigurationInvalid
+- `5` ProtocolNotSupported
+- `6` ServerCertificateNotTrusted
+- `7` InnerProtocolNotSupported
+- `8` InternalError
+- `9` UserCancelledAuthentication
+- `10` UnknownRootCertificate
+- `11` NoRootCertificate
+- `12` CertificateExpired
+- `13` CertificateNotYetValid
+- `14` CertificateRequiresConfirmation
+- `15` UserInputNotPossible
+- `16` ResourceUnavailable
+- `17` ProtocolError
+- `18` AuthenticationStalled
+- `19` IdentityDecryptionError
+- `20` OtherInputRequired
+- `1000` ErrnoError: see `domain_specific_error`
+- `1001` SecurityError: see `domain_specific_error` (an OSStatus)
+- `1002` PluginSpecificError
+
+### `mode`
+
+- `0` None
+- `1` User: the logged-in user's credentials
+- `2` LoginWindow: credentials entered at the login window
+- `3` System: machine credentials (e.g. a device certificate), no user needed
+- `4` MachineOrUser (Windows only): user credentials while a user is logged on, machine credentials otherwise. This is also Windows' default when a profile omits `authMode`.
 
 ## When is there a row?
 
