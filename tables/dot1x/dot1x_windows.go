@@ -301,7 +301,6 @@ func (b *windowsBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 
 	s.State, s.SupplicantState = mapWlanState(ifState)
 	s.ClientStatus = -1
-	s.DomainSpecificError = -1
 	s.Mode = -1
 	s.TLSTrustClientStatus = -1
 	s.TLSNegotiatedCipher = -1
@@ -309,8 +308,8 @@ func (b *windowsBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 	s.EAPType = -1
 	s.TLSSessionWasResumed = -1
 
-	if ifState != wlanIfaceStateConnected && ifState != wlanIfaceStateAuthenticating {
-		return s, nil
+	if err := checkActiveConnection(ifState); err != nil {
+		return s, err
 	}
 
 	var dataSize uint32
@@ -375,6 +374,19 @@ func (b *windowsBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 	}
 
 	return s, nil
+}
+
+// errNoActiveConnection is returned by GetStatus for an adapter that is not
+// connected or authenticating; like macOS, idle adapters produce no row.
+var errNoActiveConnection = errors.New("no active WLAN connection")
+
+// checkActiveConnection returns errNoActiveConnection unless ifState is
+// connected or authenticating.
+func checkActiveConnection(ifState uint32) error {
+	if ifState != wlanIfaceStateConnected && ifState != wlanIfaceStateAuthenticating {
+		return errNoActiveConnection
+	}
+	return nil
 }
 
 // errNotDot1X is returned by GetStatus for a WLAN connection that is not

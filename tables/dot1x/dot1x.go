@@ -24,7 +24,7 @@ type Dot1XStatus struct {
 	EAPType                      int    // EAP method code (e.g. 13=TLS)
 	EAPTypeName                  string // human-readable EAP method (e.g. "EAP-TLS")
 	ClientStatus                 int    // 0=ok, nonzero=error code
-	DomainSpecificError          int
+	DomainSpecificError          *int   // Apple OSStatus (may be negative); nil = absent
 	AuthenticatorMACAddress      string // colon-separated
 	Mode                         int    // 0=None,1=User,2=LoginWindow,3=System
 	TLSSessionWasResumed         int    // 1=resumed, 0=not, -1=unknown
@@ -143,7 +143,8 @@ func Dot1XStatusGenerate(ctx context.Context, queryContext table.QueryContext) (
 
 // generateRows queries the backend for the requested interfaces. If the
 // constraint "interface" is provided, only that interface is queried;
-// otherwise en0 through en9 are probed. The context is checked before each
+// otherwise the platform default list is probed (real en* interfaces on
+// macOS, WLAN adapters on Windows). The context is checked before each
 // backend call to support cancellation.
 func generateRows(ctx context.Context, backend Dot1XBackend, queryContext table.QueryContext) ([]map[string]string, error) {
 	ifaces := interfacesToQuery(backend, queryContext)
@@ -176,7 +177,7 @@ type interfaceLister interface {
 // interfacesToQuery returns the list of interfaces to query. If a WHERE
 // constraint "interface" is present, only that interface is returned;
 // otherwise the platform-specific default list is used (e.g. real
-// wireless adapter names on Windows, en0-en9 on macOS).
+// wireless adapter names on Windows, real en* interfaces on macOS).
 func interfacesToQuery(backend Dot1XBackend, queryContext table.QueryContext) []string {
 	if constraints, ok := queryContext.Constraints["interface"]; ok {
 		seen := make(map[string]struct{})
@@ -228,7 +229,7 @@ func rowFromStatus(s Dot1XStatus) map[string]string {
 		"eap_type":                        itoa(s.EAPType),
 		"eap_type_name":                   "",
 		"client_status":                   itoa(s.ClientStatus),
-		"domain_specific_error":           itoa(s.DomainSpecificError),
+		"domain_specific_error":           optItoa(s.DomainSpecificError),
 		"authenticator_mac_address":       s.AuthenticatorMACAddress,
 		"mode":                            itoa(s.Mode),
 		"mode_name":                       lookupName(modeNames, s.Mode),
@@ -263,6 +264,14 @@ func itoa(v int) string {
 		return ""
 	}
 	return strconv.Itoa(v)
+}
+
+// optItoa renders p (negatives included), or "" when nil.
+func optItoa(p *int) string {
+	if p == nil {
+		return ""
+	}
+	return strconv.Itoa(*p)
 }
 
 func lookupName(names map[int]string, v int) string {

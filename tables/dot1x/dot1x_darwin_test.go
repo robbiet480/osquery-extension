@@ -59,7 +59,7 @@ func TestDarwinMockBackendSystemEAPTLS(t *testing.T) {
 				EAPType:                 13,
 				EAPTypeName:             "EAP-TLS",
 				ClientStatus:            0,
-				DomainSpecificError:     0,
+				DomainSpecificError:     intPtr(0),
 				AuthenticatorMACAddress: "00:11:22:33:44:55",
 				Mode:                    3, // System
 				TLSSessionWasResumed:    1,
@@ -124,7 +124,6 @@ func TestDarwinMockBackendIdle(t *testing.T) {
 				SupplicantState:      0, // Disconnected
 				EAPType:              -1,
 				ClientStatus:         -1,
-				DomainSpecificError:  -1,
 				Mode:                 -1,
 				TLSTrustClientStatus: -1,
 				TLSNegotiatedCipher:  -1,
@@ -167,7 +166,7 @@ func TestDarwinMockBackendPEAP(t *testing.T) {
 				EAPType:                      25,
 				InnerEAPType:                 26,
 				ClientStatus:                 0,
-				DomainSpecificError:          0,
+				DomainSpecificError:          intPtr(0),
 				Mode:                         2, // LoginWindow
 				AuthenticatorMACAddress:      "aa:bb:cc:dd:ee:ff",
 				TLSSessionWasResumed:         1,
@@ -272,4 +271,13 @@ func TestDarwinMockBackendUnavailable(t *testing.T) {
 	rows, err := generateRows(context.Background(), backend, constraintFor("en0"))
 	assert.ErrorIs(t, err, ErrBackendUnavailable)
 	assert.Empty(t, rows)
+}
+
+// Docks/USB adapters commonly get en10+; all en* names must be probed.
+func TestEnInterfaceNames(t *testing.T) {
+	t.Parallel()
+
+	got := enInterfaceNames([]string{"lo0", "en0", "anpi0", "en12", "bridge0", "utun3", "en5", "awdl0", "enc0"})
+	assert.Equal(t, []string{"en0", "en12", "en5"}, got)
+	assert.Empty(t, enInterfaceNames(nil))
 }

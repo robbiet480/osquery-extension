@@ -14,7 +14,7 @@ import (
 // profile XML. Numeric fields are -1 when absent/invalid.
 type wlanProfileInfo struct {
 	eapType           int    // outer EAP method type (first <EapMethod><Type>)
-	innerEAPType      int    // inner/tunneled EAP method type (second <EapMethod><Type>)
+	innerEAPType      int    // inner/tunneled EAP method type (see parseWLANProfile)
 	authMode          int    // EAPOLControlMode mapped from <authMode>
 	trustedRootCASHA1 string // comma-separated colon-delimited SHA-1 thumbprints
 }
@@ -22,14 +22,17 @@ type wlanProfileInfo struct {
 // parseWLANProfile extracts every 802.1X field from a WLAN profile XML in a
 // single token pass. Matching is by local element name, so namespace prefixes
 // and attributes on elements are tolerated. The outer EAP type is the <Type>
-// inside the first <EapMethod>; the inner type is the <Type> inside the second
-// <EapMethod> (tunneled methods like PEAP/EAP-TTLS); authMode is the first
+// inside the first <EapMethod>. The inner type (first found wins) is either the
+// <Type> of an <Eap> nested inside another <Eap> (PEAP:
+// Config/Eap/EapType/Eap/Type) or the <Type> inside a second <EapMethod>
+// (EAP-TTLS nests a full EapHostConfig under Phase2Authentication); authMode is the first
 // <authMode>; trusted root CA thumbprints are every valid 40-hex-char
 // <TrustedRootCA> (comma-joined).
 func parseWLANProfile(xmlStr string) wlanProfileInfo {
 	info := wlanProfileInfo{eapType: -1, innerEAPType: -1, authMode: -1}
 	dec := xml.NewDecoder(strings.NewReader(xmlStr))
 	eapMethodCount := 0
+	eapDepth := 0 // nesting level of <Eap> elements
 	gotAuthMode := false
 	var caHashes []string
 	for {
@@ -37,18 +40,32 @@ func parseWLANProfile(xmlStr string) wlanProfileInfo {
 		if err != nil {
 			break
 		}
+		if ee, ok := tok.(xml.EndElement); ok && ee.Name.Local == "Eap" {
+			eapDepth--
+			continue
+		}
 		se, ok := tok.(xml.StartElement)
 		if !ok {
 			continue
 		}
 		switch se.Name.Local {
+		case "Eap":
+			eapDepth++
+		case "Type":
+			// Schema order puts <Type> first in <Eap>, so the first <Type>
+			// at Eap depth 2 is the nested Eap's own (inner) method type.
+			if eapDepth == 2 && info.innerEAPType == -1 {
+				if v, ok := readIntCharData(dec); ok {
+					info.innerEAPType = v
+				}
+			}
 		case "EapMethod":
 			eapMethodCount++
 			if t, ok := readEapMethodType(dec); ok {
-				switch eapMethodCount {
-				case 1:
+				switch {
+				case eapMethodCount == 1:
 					info.eapType = t
-				case 2:
+				case eapMethodCount == 2 && info.innerEAPType == -1:
 					info.innerEAPType = t
 				}
 			}

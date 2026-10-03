@@ -46,6 +46,7 @@ go_test(
         "dot1x_wlanprofile_test.go",
         "dot1x_windows_test.go",
     ],
+    data = glob(["testdata/**"]),
     embed = [":dot1x"],
     deps = [
         "@com_github_osquery_osquery_go//plugin/table",

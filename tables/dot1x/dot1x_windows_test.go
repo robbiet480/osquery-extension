@@ -161,7 +161,6 @@ func TestWindowsMockBackendConnected(t *testing.T) {
 				Mode:                    3,
 				TLSTrustedRootCASHA1:    "23:a6:b1:0a:be:8a:4a:37:72:11:e2:f4:2c:36:67:f1:36:e9:08:bf",
 				UniqueIdentifier:        "{9A82D898-7B57-40AA-A330-E2B99D10BD77}",
-				DomainSpecificError:     -1,
 				TLSTrustClientStatus:    -1,
 				TLSNegotiatedCipher:     -1,
 				InnerEAPType:            -1,
@@ -211,7 +210,6 @@ func TestWindowsMockBackendDisconnected(t *testing.T) {
 				EAPType:              -1,
 				ClientStatus:         -1,
 				Mode:                 -1,
-				DomainSpecificError:  -1,
 				TLSTrustClientStatus: -1,
 				TLSNegotiatedCipher:  -1,
 				InnerEAPType:         -1,
@@ -255,7 +253,6 @@ func TestWindowsMockBackendPEAP(t *testing.T) {
 				Mode:                    1,
 				AuthenticatorMACAddress: "aa:bb:cc:dd:ee:ff",
 				UniqueIdentifier:        "{11111111-2222-3333-4444-555555555555}",
-				DomainSpecificError:     -1,
 				TLSTrustClientStatus:    -1,
 				TLSNegotiatedCipher:     -1,
 				TLSSessionWasResumed:    -1,
@@ -328,8 +325,8 @@ func TestWindowsLiveBackend(t *testing.T) {
 		if errors.Is(err, ErrBackendUnavailable) {
 			t.Skipf("WLAN service unavailable: %v", err)
 		}
-		if errors.Is(err, errNotDot1X) {
-			continue // connected, but not to an 802.1X network
+		if errors.Is(err, errNotDot1X) || errors.Is(err, errNoActiveConnection) {
+			continue // idle, or connected but not to an 802.1X network
 		}
 		require.NoError(t, err)
 		assert.Equal(t, ifname, s.Interface)
@@ -416,4 +413,21 @@ func TestApplyOneXSecurityDot1XAuthenticating(t *testing.T) {
 	require.NoError(t, applyOneXSecurity(&s, wlanIfaceStateAuthenticating, true))
 	assert.Equal(t, 3, s.SupplicantState)
 	assert.Equal(t, -1, s.ClientStatus)
+}
+
+// Idle/transitional adapters have no current connection to inspect for
+// 802.1X, so they're skipped (macOS reports nothing for interfaces without
+// active EAPOL). Only connected/authenticating adapters proceed.
+func TestCheckActiveConnection(t *testing.T) {
+	t.Parallel()
+
+	for _, st := range []uint32{wlanIfaceStateConnected, wlanIfaceStateAuthenticating} {
+		assert.NoError(t, checkActiveConnection(st), "state %d", st)
+	}
+	for _, st := range []uint32{
+		wlanIfaceStateNotReady, wlanIfaceStateDisconnected, wlanIfaceStateDisconnecting,
+		wlanIfaceStateAssociating, wlanIfaceStateDiscovering, wlanIfaceStateAdHocFormed, 99,
+	} {
+		assert.ErrorIs(t, checkActiveConnection(st), errNoActiveConnection, "state %d", st)
+	}
 }

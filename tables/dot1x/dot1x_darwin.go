@@ -199,6 +199,7 @@ int dot1x_query(
 	char** out_eap_type_name,
 	int* out_client_status,
 	int* out_domain_specific_error,
+	int* out_domain_specific_error_present,
 	uint8_t** out_auth_mac,
 	CFIndex* out_auth_mac_len,
 	int* out_mode,
@@ -219,7 +220,8 @@ int dot1x_query(
 	*out_eap_type = -1;
 	*out_eap_type_name = NULL;
 	*out_client_status = -1;
-	*out_domain_specific_error = -1;
+	*out_domain_specific_error = 0;
+	*out_domain_specific_error_present = 0;
 	*out_auth_mac = NULL;
 	*out_auth_mac_len = 0;
 	*out_mode = -1;
@@ -275,7 +277,16 @@ int dot1x_query(
 	*out_eap_type = get_dict_int_v(status, kEAPType);
 	*out_eap_type_name = get_dict_string_v(status, kEAPTypeName);
 	*out_client_status = get_dict_int_v(status, kClientStatus);
-	*out_domain_specific_error = get_dict_int_v(status, kDomainSpecificError);
+	{
+		CFTypeRef v = NULL;
+		int32_t n = 0;
+		if (CFDictionaryGetValueIfPresent(status, kDomainSpecificError, &v) && v != NULL &&
+		    CFGetTypeID(v) == CFNumberGetTypeID() &&
+		    CFNumberGetValue((CFNumberRef)v, kCFNumberSInt32Type, &n)) {
+			*out_domain_specific_error = (int)n;
+			*out_domain_specific_error_present = 1;
+		}
+	}
 	*out_auth_mac = get_dict_data_v(status, kAuthenticatorMACAddress, out_auth_mac_len);
 	*out_mode = get_dict_int_v(status, kMode);
 	*out_unique_identifier = get_dict_string_v(status, kUniqueIdentifier);
@@ -322,6 +333,8 @@ int dot1x_query(
 import "C"
 import (
 	"fmt"
+	"net"
+	"regexp"
 	"strconv"
 	"sync"
 	"unsafe"
@@ -348,6 +361,7 @@ func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 		cEAPTypeName      *C.char
 		cClientStatus     C.int
 		cDomainError      C.int
+		cDomainErrorSet   C.int
 		cAuthMAC          *C.uint8_t
 		cAuthMACLen       C.CFIndex
 		cMode             C.int
@@ -371,6 +385,7 @@ func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 		&cEAPTypeName,
 		&cClientStatus,
 		&cDomainError,
+		&cDomainErrorSet,
 		&cAuthMAC,
 		&cAuthMACLen,
 		&cMode,
@@ -392,9 +407,13 @@ func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 		SupplicantState:      int(cSupplicantState),
 		EAPType:              int(cEAPType),
 		ClientStatus:         int(cClientStatus),
-		DomainSpecificError:  int(cDomainError),
 		Mode:                 int(cMode),
 		TLSSessionWasResumed: int(cTLSResumed),
+	}
+
+	if cDomainErrorSet != 0 {
+		v := int(cDomainError)
+		s.DomainSpecificError = &v
 	}
 
 	defer func() {
@@ -465,10 +484,34 @@ func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 	return s, nil
 }
 
+// defaultInterfaces returns the real en* interfaces on this host, falling back
+// to en0-en9 if enumeration fails or finds none.
 func defaultInterfaces() []string {
+	if all, err := net.Interfaces(); err == nil {
+		names := make([]string, 0, len(all))
+		for _, i := range all {
+			names = append(names, i.Name)
+		}
+		if en := enInterfaceNames(names); len(en) > 0 {
+			return en
+		}
+	}
 	ifaces := make([]string, 0, 10)
 	for i := 0; i < 10; i++ {
 		ifaces = append(ifaces, "en"+strconv.Itoa(i))
 	}
 	return ifaces
+}
+
+var enIfaceRe = regexp.MustCompile(`^en[0-9]+$`)
+
+// enInterfaceNames returns the names matching ^en[0-9]+$, in input order.
+func enInterfaceNames(names []string) []string {
+	var out []string
+	for _, n := range names {
+		if enIfaceRe.MatchString(n) {
+			out = append(out, n)
+		}
+	}
+	return out
 }

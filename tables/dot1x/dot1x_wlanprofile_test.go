@@ -5,9 +5,12 @@ package dot1x
 // only Windows).
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const sampleProfileXML = `<?xml version="1.0"?>
@@ -73,9 +76,7 @@ const peapProfileXML = `<?xml version="1.0"?>
 									<Eap>
 										<Type>26</Type>
 										<EapType>
-											<EapMethod>
-												<Type>26</Type>
-											</EapMethod>
+											<UseWinLogonCredentials>false</UseWinLogonCredentials>
 										</EapType>
 									</Eap>
 								</EapType>
@@ -249,4 +250,39 @@ func TestFormatSHA1Hex(t *testing.T) {
 	assert.Equal(t, "", formatSHA1Hex("a"))
 	assert.Equal(t, "", formatSHA1Hex("abc"))
 	assert.Equal(t, "aa:bb", formatSHA1Hex("aabb"))
+}
+
+// TestParseWLANProfileRealExports parses profiles exported with
+// "netsh wlan export profile" from Windows 11 25H2 after "netsh wlan add
+// profile" accepted them. PEAP keeps its inner method at
+// Config/Eap/EapType/Eap/Type (no second EapMethod); TTLS with an inner EAP
+// method nests a full EapHostConfig (second EapMethod) under
+// Phase2Authentication; TTLS with PAP has no inner EAP method at all.
+func TestParseWLANProfileRealExports(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		file      string
+		wantOuter int
+		wantInner int
+		wantMode  int
+	}{
+		{"wlanprofile-peap-mschapv2.xml", 25, 26, 1},
+		{"wlanprofile-peap-tls.xml", 25, 13, 3},
+		{"wlanprofile-ttls-eapmschapv2.xml", 21, 26, 1},
+		{"wlanprofile-ttls-pap.xml", 21, -1, 1},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.file, func(t *testing.T) {
+			t.Parallel()
+			b, err := os.ReadFile(filepath.Join("testdata", tc.file))
+			require.NoError(t, err)
+			info := parseWLANProfile(string(b))
+			assert.Equal(t, tc.wantOuter, info.eapType, "outer EAP type")
+			assert.Equal(t, tc.wantInner, info.innerEAPType, "inner EAP type")
+			assert.Equal(t, tc.wantMode, info.authMode, "auth mode")
+		})
+	}
 }

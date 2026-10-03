@@ -165,7 +165,7 @@ func TestRowFromStatus(t *testing.T) {
 		EAPType:                      13,
 		EAPTypeName:                  "EAP-TLS",
 		ClientStatus:                 0,
-		DomainSpecificError:          0,
+		DomainSpecificError:          intPtr(0),
 		AuthenticatorMACAddress:      "aa:bb:cc:dd:ee:ff",
 		Mode:                         1,
 		TLSSessionWasResumed:         1,
@@ -711,3 +711,17 @@ func TestRenderRDNSequence(t *testing.T) {
 		}
 	})
 }
+
+// DomainSpecificError carries an Apple OSStatus (e.g. errSSLXCertChainInvalid
+// = -9807), so negative values are real data and must render; only an absent
+// value (nil) renders empty.
+func TestRowFromStatusDomainSpecificError(t *testing.T) {
+	t.Parallel()
+
+	neg, zero := -9807, 0
+	assert.Equal(t, "-9807", rowFromStatus(Dot1XStatus{DomainSpecificError: &neg})["domain_specific_error"])
+	assert.Equal(t, "0", rowFromStatus(Dot1XStatus{DomainSpecificError: &zero})["domain_specific_error"])
+	assert.Equal(t, "", rowFromStatus(Dot1XStatus{})["domain_specific_error"])
+}
+
+func intPtr(v int) *int { return &v }
