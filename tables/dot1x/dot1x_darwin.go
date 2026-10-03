@@ -109,13 +109,6 @@ static char* get_dict_string_v(CFDictionaryRef d, CFStringRef key) {
 	return cfstring_go((CFStringRef)v);
 }
 
-// get_dict_bool_v extracts a boolean value for a CFString key from the dictionary.
-static int get_dict_bool_v(CFDictionaryRef d, CFStringRef key) {
-	CFTypeRef v = NULL;
-	CFDictionaryGetValueIfPresent(d, key, &v);
-	return cfbool_int(v);
-}
-
 // get_dict_data_v extracts raw bytes from a CFData value for a CFString key.
 static uint8_t* get_dict_data_v(CFDictionaryRef d, CFStringRef key, CFIndex* out_len) {
 	CFTypeRef v = NULL;
@@ -230,7 +223,7 @@ int dot1x_query(
 	*out_auth_mac = NULL;
 	*out_auth_mac_len = 0;
 	*out_mode = -1;
-	*out_tls_session_was_resumed = 0;
+	*out_tls_session_was_resumed = -1;
 	*out_cert_chain_data = NULL;
 	*out_cert_chain_len = 0;
 	*out_tls_trust_client_status = -1;
@@ -302,7 +295,10 @@ int dot1x_query(
 		if (CFDictionaryGetValueIfPresent(status, kAdditionalProperties, &apVal) && apVal) {
 			if (CFGetTypeID(apVal) == CFDictionaryGetTypeID()) {
 				CFDictionaryRef apDict = (CFDictionaryRef)apVal;
-				*out_tls_session_was_resumed = get_dict_bool_v(apDict, kTLSSessionWasResumed);
+				CFTypeRef resumed = NULL;
+				if (CFDictionaryGetValueIfPresent(apDict, kTLSSessionWasResumed, &resumed)) {
+					*out_tls_session_was_resumed = cfbool_int(resumed);
+				}
 				CFTypeRef certChain = NULL;
 				CFDictionaryGetValueIfPresent(apDict, kTLSServerCertChain, &certChain);
 				if (certChain && CFGetTypeID(certChain) == CFArrayGetTypeID()) {
@@ -398,7 +394,7 @@ func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 		ClientStatus:         int(cClientStatus),
 		DomainSpecificError:  int(cDomainError),
 		Mode:                 int(cMode),
-		TLSSessionWasResumed: cTLSResumed == 1,
+		TLSSessionWasResumed: int(cTLSResumed),
 	}
 
 	defer func() {

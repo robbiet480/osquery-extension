@@ -62,7 +62,7 @@ func TestDarwinMockBackendSystemEAPTLS(t *testing.T) {
 				DomainSpecificError:     0,
 				AuthenticatorMACAddress: "00:11:22:33:44:55",
 				Mode:                    3, // System
-				TLSSessionWasResumed:    true,
+				TLSSessionWasResumed:    1,
 				// Two-cert chain: leaf | issuing CA. DNs are pipe-separated
 				// because LDAP DNs themselves use commas as RDN separators.
 				TLSServerCertificateChain: "CN=radius.campus.edu,OU=IT,O=CampusGroup,C=US|CN=CampusGroup Root CA,O=CampusGroup,C=US",
@@ -170,7 +170,7 @@ func TestDarwinMockBackendPEAP(t *testing.T) {
 				DomainSpecificError:          0,
 				Mode:                         2, // LoginWindow
 				AuthenticatorMACAddress:      "aa:bb:cc:dd:ee:ff",
-				TLSSessionWasResumed:         true,
+				TLSSessionWasResumed:         1,
 				TLSTrustClientStatus:         0,
 				TLSNegotiatedProtocolVersion: "1.3",
 				TLSNegotiatedCipher:          0x1301, // TLS_AES_128_GCM_SHA256

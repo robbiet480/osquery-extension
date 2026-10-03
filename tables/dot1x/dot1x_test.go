@@ -168,7 +168,7 @@ func TestRowFromStatus(t *testing.T) {
 		DomainSpecificError:          0,
 		AuthenticatorMACAddress:      "aa:bb:cc:dd:ee:ff",
 		Mode:                         1,
-		TLSSessionWasResumed:         true,
+		TLSSessionWasResumed:         1,
 		TLSServerCertificateChain:    "CN=radius.campus.edu,OU=IT,O=Campus,C=US",
 		TLSServerCertificateSHA1:     "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd",
 		TLSServerCertificateSerials:  "7D3A1F9E2B5C",
@@ -214,7 +214,7 @@ func TestRowFromStatusUnsetFields(t *testing.T) {
 		Interface:            "en0",
 		State:                0,
 		SupplicantState:      8,
-		TLSSessionWasResumed: false,
+		TLSSessionWasResumed: 0,
 	}
 
 	row := rowFromStatus(s)
@@ -222,6 +222,15 @@ func TestRowFromStatusUnsetFields(t *testing.T) {
 	assert.Equal(t, "No Authenticator", row["supplicant_state_name"])
 	assert.Equal(t, "", row["eap_type_name"])
 	assert.Equal(t, "0", row["tls_session_was_resumed"])
+}
+
+// TLSSessionWasResumed is tri-state: -1 means the backend can't know (e.g.
+// Windows, or the key is absent on macOS) and must render empty, not "0".
+func TestRowFromStatusTLSSessionWasResumedUnknown(t *testing.T) {
+	t.Parallel()
+
+	row := rowFromStatus(Dot1XStatus{Interface: "en0", TLSSessionWasResumed: -1})
+	assert.Equal(t, "", row["tls_session_was_resumed"])
 }
 
 func TestRowFromStatusUnknownEnumValues(t *testing.T) {

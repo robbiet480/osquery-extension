@@ -152,19 +152,20 @@ func TestWindowsMockBackendConnected(t *testing.T) {
 	backend := fakeBackend{
 		statuses: map[string]Dot1XStatus{
 			"RZ616 Wi-Fi 6E 160MHz": {
-				Interface:                "RZ616 Wi-Fi 6E 160MHz",
-				State:                    2,
-				SupplicantState:          4,
-				EAPType:                  13,
-				ClientStatus:             0,
+				Interface:               "RZ616 Wi-Fi 6E 160MHz",
+				State:                   2,
+				SupplicantState:         4,
+				EAPType:                 13,
+				ClientStatus:            0,
 				AuthenticatorMACAddress: "26:0b:8b:00:f2:34",
 				Mode:                    3,
 				TLSTrustedRootCASHA1:    "23:a6:b1:0a:be:8a:4a:37:72:11:e2:f4:2c:36:67:f1:36:e9:08:bf",
 				UniqueIdentifier:        "{9A82D898-7B57-40AA-A330-E2B99D10BD77}",
-				DomainSpecificError:      -1,
-				TLSTrustClientStatus:     -1,
-				TLSNegotiatedCipher:      -1,
-				InnerEAPType:             -1,
+				DomainSpecificError:     -1,
+				TLSTrustClientStatus:    -1,
+				TLSNegotiatedCipher:     -1,
+				InnerEAPType:            -1,
+				TLSSessionWasResumed:    -1,
 			},
 		},
 	}
@@ -214,6 +215,7 @@ func TestWindowsMockBackendDisconnected(t *testing.T) {
 				TLSTrustClientStatus: -1,
 				TLSNegotiatedCipher:  -1,
 				InnerEAPType:         -1,
+				TLSSessionWasResumed: -1,
 				UniqueIdentifier:     "{ABCDEF01-2345-6789-ABCD-EF0123456789}",
 			},
 		},
@@ -256,6 +258,7 @@ func TestWindowsMockBackendPEAP(t *testing.T) {
 				DomainSpecificError:     -1,
 				TLSTrustClientStatus:    -1,
 				TLSNegotiatedCipher:     -1,
+				TLSSessionWasResumed:    -1,
 			},
 		},
 	}
@@ -325,11 +328,15 @@ func TestWindowsLiveBackend(t *testing.T) {
 		if errors.Is(err, ErrBackendUnavailable) {
 			t.Skipf("WLAN service unavailable: %v", err)
 		}
+		if errors.Is(err, errNotDot1X) {
+			continue // connected, but not to an 802.1X network
+		}
 		require.NoError(t, err)
 		assert.Equal(t, ifname, s.Interface)
 		assert.NotEmpty(t, s.UniqueIdentifier, "GUID should always be set")
 		assert.GreaterOrEqual(t, s.State, 0)
 		assert.LessOrEqual(t, s.State, 3)
+		assert.Equal(t, -1, s.TLSSessionWasResumed, "wlanapi doesn't expose TLS resumption")
 	}
 }
 
@@ -380,4 +387,33 @@ func TestWindowsLiveProfileXMLExtraction(t *testing.T) {
 		return
 	}
 	t.Skip("no connected wireless interface found")
+}
+
+// A WLAN connection without 802.1X (open/PSK/SAE) must not produce a row:
+// macOS reports nothing for such interfaces, and emitting state=Running with
+// supplicant_state=Disconnected would be misleading.
+func TestApplyOneXSecurityNotDot1X(t *testing.T) {
+	t.Parallel()
+
+	s := Dot1XStatus{State: 2, SupplicantState: 4}
+	err := applyOneXSecurity(&s, wlanIfaceStateConnected, false)
+	assert.ErrorIs(t, err, errNotDot1X)
+}
+
+func TestApplyOneXSecurityDot1XConnected(t *testing.T) {
+	t.Parallel()
+
+	s := Dot1XStatus{State: 2, SupplicantState: 4, ClientStatus: -1}
+	require.NoError(t, applyOneXSecurity(&s, wlanIfaceStateConnected, true))
+	assert.Equal(t, 4, s.SupplicantState)
+	assert.Equal(t, 0, s.ClientStatus)
+}
+
+func TestApplyOneXSecurityDot1XAuthenticating(t *testing.T) {
+	t.Parallel()
+
+	s := Dot1XStatus{State: 2, SupplicantState: 3, ClientStatus: -1}
+	require.NoError(t, applyOneXSecurity(&s, wlanIfaceStateAuthenticating, true))
+	assert.Equal(t, 3, s.SupplicantState)
+	assert.Equal(t, -1, s.ClientStatus)
 }

@@ -3,6 +3,7 @@
 package dot1x
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"syscall"
@@ -306,6 +307,7 @@ func (b *windowsBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 	s.TLSNegotiatedCipher = -1
 	s.InnerEAPType = -1
 	s.EAPType = -1
+	s.TLSSessionWasResumed = -1
 
 	if ifState != wlanIfaceStateConnected && ifState != wlanIfaceStateAuthenticating {
 		return s, nil
@@ -345,14 +347,8 @@ func (b *windowsBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 
 	s.AuthenticatorMACAddress = macAddrString(conn.AssociationAttributes.Dot11Bssid[:])
 
-	sec := conn.SecurityAttributes
-	if sec.OneXEnabled != 0 {
-		if ifState == wlanIfaceStateConnected {
-			s.SupplicantState = 4 // Authenticated
-			s.ClientStatus = 0
-		}
-	} else {
-		s.SupplicantState = 0 // not an 802.1X network
+	if err := applyOneXSecurity(&s, ifState, conn.SecurityAttributes.OneXEnabled != 0); err != nil {
+		return s, err
 	}
 
 	profileName := utf16ToString(conn.ProfileName[:])
@@ -379,6 +375,24 @@ func (b *windowsBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 	}
 
 	return s, nil
+}
+
+// errNotDot1X is returned by GetStatus for a WLAN connection that is not
+// using 802.1X (open/PSK/SAE), so generateRows skips the interface like macOS.
+var errNotDot1X = errors.New("802.1X not enabled on current WLAN connection")
+
+// applyOneXSecurity applies the connection's 802.1X security state to s. It
+// returns errNotDot1X when 802.1X is not enabled; when connected it marks the
+// supplicant Authenticated with ClientStatus success.
+func applyOneXSecurity(s *Dot1XStatus, ifState uint32, oneXEnabled bool) error {
+	if !oneXEnabled {
+		return errNotDot1X
+	}
+	if ifState == wlanIfaceStateConnected {
+		s.SupplicantState = 4 // Authenticated
+		s.ClientStatus = 0
+	}
+	return nil
 }
 
 // getWlanProfileXML calls WlanGetProfile and returns the profile XML string.

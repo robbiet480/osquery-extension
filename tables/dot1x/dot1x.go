@@ -27,7 +27,7 @@ type Dot1XStatus struct {
 	DomainSpecificError          int
 	AuthenticatorMACAddress      string // colon-separated
 	Mode                         int    // 0=None,1=User,2=LoginWindow,3=System
-	TLSSessionWasResumed         bool
+	TLSSessionWasResumed         int    // 1=resumed, 0=not, -1=unknown
 	TLSServerCertificateChain    string // pipe-separated subject DNs in LDAP notation
 	TLSServerCertificateSHA1     string // comma-separated colon-separated SHA-1 fingerprints
 	TLSServerCertificateSerials  string // comma-separated hex serial numbers
@@ -232,6 +232,7 @@ func rowFromStatus(s Dot1XStatus) map[string]string {
 		"authenticator_mac_address":       s.AuthenticatorMACAddress,
 		"mode":                            itoa(s.Mode),
 		"mode_name":                       lookupName(modeNames, s.Mode),
+		"tls_session_was_resumed":         itoa(s.TLSSessionWasResumed),
 		"tls_server_certificate_chain":    s.TLSServerCertificateChain,
 		"tls_server_certificate_sha1":     s.TLSServerCertificateSHA1,
 		"tls_server_certificate_serials":  s.TLSServerCertificateSerials,
@@ -243,11 +244,6 @@ func rowFromStatus(s Dot1XStatus) map[string]string {
 		"inner_eap_type_name":             "",
 		"last_status_timestamp":           s.LastStatusTimestamp,
 		"unique_identifier":               s.UniqueIdentifier,
-	}
-	if s.TLSSessionWasResumed {
-		row["tls_session_was_resumed"] = "1"
-	} else {
-		row["tls_session_was_resumed"] = "0"
 	}
 	if s.EAPTypeName != "" {
 		row["eap_type_name"] = s.EAPTypeName
