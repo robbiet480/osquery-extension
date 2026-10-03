@@ -205,6 +205,12 @@ func TestParseWLANProfileTrustedRootCA(t *testing.T) {
 			"aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd",
 		},
 		{"no TrustedRootCA", `<ServerValidation></ServerValidation>`, ""},
+		// Windows' own UI writes bytes without leading zeros.
+		{"unpadded bytes", `<TrustedRootCA>8 0 f4 2d 42 8e e5 7 ff ec df fe 4f 9e 31 fd 63 c9 5a bb</TrustedRootCA>`, "08:00:f4:2d:42:8e:e5:07:ff:ec:df:fe:4f:9e:31:fd:63:c9:5a:bb"},
+		// EAP-TTLS profiles use TrustedRootCAHash instead of TrustedRootCA.
+		{"TTLS TrustedRootCAHash", `<ServerValidation><TrustedRootCAHash>58 34 c1 13 14 9c fc 9b 9f 28 70 6f db e6 81 a4 78 19 a2 0e</TrustedRootCAHash></ServerValidation>`, "58:34:c1:13:14:9c:fc:9b:9f:28:70:6f:db:e6:81:a4:78:19:a2:0e"},
+		{"too few bytes", `<TrustedRootCA>8 0 f4</TrustedRootCA>`, ""},
+		{"byte too long", `<TrustedRootCA>800 f4 2d 42 8e e5 7 ff ec df fe 4f 9e 31 fd 63 c9 5a bb 01</TrustedRootCA>`, ""},
 		{"empty", "", ""},
 		{
 			"wrong length ignored",
@@ -293,4 +299,18 @@ func TestParseWLANProfileRealExports(t *testing.T) {
 func TestModeNameMachineOrUser(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "MachineOrUser", rowFromStatus(Dot1XStatus{Mode: 4})["mode_name"])
+}
+
+// Profile Windows 11 25H2 generated itself when joining a TTLS network via
+// Settings: TTLS-PAP (no inner EAP method) and a TrustedRootCAHash written
+// with unpadded bytes.
+func TestParseWLANProfileWindowsUITTLS(t *testing.T) {
+	t.Parallel()
+
+	b, err := os.ReadFile(filepath.Join("testdata", "wlanprofile-ttls-pap-windows-ui.xml"))
+	require.NoError(t, err)
+	info := parseWLANProfile(string(b))
+	assert.Equal(t, 21, info.eapType)
+	assert.Equal(t, -1, info.innerEAPType)
+	assert.Equal(t, "08:00:f4:2d:42:8e:e5:07:ff:ec:df:fe:4f:9e:31:fd:63:c9:5a:bb", info.trustedRootCASHA1)
 }
