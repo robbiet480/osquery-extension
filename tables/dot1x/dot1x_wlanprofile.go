@@ -34,6 +34,7 @@ func parseWLANProfile(xmlStr string) wlanProfileInfo {
 	eapMethodCount := 0
 	eapDepth := 0 // nesting level of <Eap> elements
 	gotAuthMode := false
+	sawOneX := false
 	var caHashes []string
 	for {
 		tok, err := dec.Token()
@@ -69,6 +70,8 @@ func parseWLANProfile(xmlStr string) wlanProfileInfo {
 					info.innerEAPType = t
 				}
 			}
+		case "OneX":
+			sawOneX = true
 		case "authMode":
 			if !gotAuthMode {
 				if s, ok := readCharData(dec); ok {
@@ -86,6 +89,10 @@ func parseWLANProfile(xmlStr string) wlanProfileInfo {
 				}
 			}
 		}
+	}
+	// machineOrUser is the schema default when an 802.1X profile omits it.
+	if sawOneX && !gotAuthMode {
+		info.authMode = modeMachineOrUser
 	}
 	info.trustedRootCASHA1 = strings.Join(caHashes, ",")
 	return info
@@ -133,7 +140,7 @@ func mapAuthMode(s string) int {
 	case "user":
 		return 1 // User
 	case "machineOrUser":
-		return 2 // LoginWindow
+		return modeMachineOrUser
 	case "guest":
 		return 0 // None
 	default:

@@ -129,10 +129,13 @@ func TestParseWLANProfileAuthMode(t *testing.T) {
 	}{
 		{"machine", sampleProfileXML, 3},
 		{"user", peapProfileXML, 1},
-		{"machineOrUser", `<OneX><authMode>machineOrUser</authMode></OneX>`, 2},
+		// Windows-only: user creds while a user is logged on, machine creds otherwise.
+		{"machineOrUser", `<OneX><authMode>machineOrUser</authMode></OneX>`, 4},
 		{"guest", `<OneX><authMode>guest</authMode></OneX>`, 0},
 		{"unknown value", `<OneX><authMode>somethingElse</authMode></OneX>`, -1},
-		{"no authMode", `<OneX><EAPConfig></EAPConfig></OneX>`, -1},
+		// machineOrUser is the documented default when <authMode> is omitted.
+		{"no authMode defaults to machineOrUser", `<OneX><EAPConfig></EAPConfig></OneX>`, 4},
+		{"no OneX element", `<WLANProfile><name>psk</name></WLANProfile>`, -1},
 		{"empty", "", -1},
 		{"whitespace around value", `<authMode>  machine  </authMode>`, 3},
 	}
@@ -285,4 +288,9 @@ func TestParseWLANProfileRealExports(t *testing.T) {
 			assert.Equal(t, tc.wantMode, info.authMode, "auth mode")
 		})
 	}
+}
+
+func TestModeNameMachineOrUser(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "MachineOrUser", rowFromStatus(Dot1XStatus{Mode: 4})["mode_name"])
 }

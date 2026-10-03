@@ -3,6 +3,7 @@
 package dot1x
 
 /*
+#cgo LDFLAGS: -framework CoreFoundation
 #include <CoreFoundation/CoreFoundation.h>
 #include <dlfcn.h>
 #include <stdio.h>

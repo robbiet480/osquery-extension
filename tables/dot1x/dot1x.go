@@ -27,7 +27,7 @@ type Dot1XStatus struct {
 	ClientStatus                 int    // 0=ok, nonzero=error code
 	DomainSpecificError          *int   // Apple OSStatus (may be negative); nil = absent
 	AuthenticatorMACAddress      string // colon-separated
-	Mode                         int    // 0=None,1=User,2=LoginWindow,3=System
+	Mode                         int    // 0=None,1=User,2=LoginWindow,3=System,4=MachineOrUser (Windows)
 	TLSSessionWasResumed         int    // 1=resumed, 0=not, -1=unknown
 	TLSServerCertificateChain    string // pipe-separated subject DNs in LDAP notation
 	TLSServerCertificateSHA1     string // comma-separated colon-separated SHA-1 fingerprints
@@ -105,7 +105,12 @@ var modeNames = map[int]string{
 	1: "User",
 	2: "LoginWindow",
 	3: "System",
+	// Windows-only (not an EAPOLControlMode): user credentials while a user
+	// is logged on, machine credentials otherwise.
+	modeMachineOrUser: "MachineOrUser",
 }
+
+const modeMachineOrUser = 4
 
 // Dot1XStatusColumns returns the column definitions.
 func Dot1XStatusColumns() []table.ColumnDefinition {
