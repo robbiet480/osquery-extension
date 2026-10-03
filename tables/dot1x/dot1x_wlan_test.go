@@ -8,6 +8,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"unicode/utf16"
 	"unsafe"
@@ -397,4 +399,45 @@ func TestCheckActiveConnection(t *testing.T) {
 	} {
 		assert.ErrorIs(t, checkActiveConnection(st), errNoActiveConnection, "state %d", st)
 	}
+}
+
+// While a connection is authenticating, wlanapi hasn't populated
+// SecurityAttributes yet (OneXEnabled=0, observed live on Windows 11 25H2),
+// so whether it's 802.1X must come from the profile's <useOneX>.
+func TestWlanStatusAuthenticatingOneXFromProfile(t *testing.T) {
+	t.Parallel()
+	c := newFake(t, wlanIfaceStateAuthenticating, connAttrs(wlanIfaceStateAuthenticating, false, "PEAPNetwork"), readTestdata(t, "wlanprofile-peap-mschapv2.xml"))
+
+	s, err := wlanStatus(c, testIface)
+	require.NoError(t, err)
+	assert.Equal(t, 2, s.State)
+	assert.Equal(t, 3, s.SupplicantState, "Authenticating")
+	assert.Equal(t, -1, s.ClientStatus)
+	assert.Equal(t, 25, s.EAPType)
+	assert.Equal(t, 26, s.InnerEAPType)
+}
+
+func TestWlanStatusAuthenticatingNotDot1X(t *testing.T) {
+	t.Parallel()
+	psk := `<WLANProfile><MSM><security><authEncryption><useOneX>false</useOneX></authEncryption></security></MSM></WLANProfile>`
+	c := newFake(t, wlanIfaceStateAuthenticating, connAttrs(wlanIfaceStateAuthenticating, false, "Home"), psk)
+
+	_, err := wlanStatus(c, testIface)
+	assert.ErrorIs(t, err, errNotDot1X)
+}
+
+func TestWlanStatusAuthenticatingProfileUnavailable(t *testing.T) {
+	t.Parallel()
+	c := newFake(t, wlanIfaceStateAuthenticating, connAttrs(wlanIfaceStateAuthenticating, false, "PEAPNetwork"), readTestdata(t, "wlanprofile-peap-mschapv2.xml"))
+	c.profileErr = errors.New("profile gone")
+
+	_, err := wlanStatus(c, testIface)
+	assert.ErrorIs(t, err, errNotDot1X, "can't confirm 802.1X without the flag or the profile")
+}
+
+func readTestdata(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", name))
+	require.NoError(t, err)
+	return string(b)
 }

@@ -17,6 +17,7 @@ type wlanProfileInfo struct {
 	innerEAPType      int    // inner/tunneled EAP method type (see parseWLANProfile)
 	authMode          int    // EAPOLControlMode mapped from <authMode>
 	trustedRootCASHA1 string // comma-separated colon-delimited SHA-1 thumbprints
+	useOneX           bool   // <useOneX>true</useOneX>: the profile is 802.1X
 }
 
 // parseWLANProfile extracts every 802.1X field from a WLAN profile XML in a
@@ -72,6 +73,10 @@ func parseWLANProfile(xmlStr string) wlanProfileInfo {
 			}
 		case "OneX":
 			sawOneX = true
+		case "useOneX":
+			if v, ok := readCharData(dec); ok {
+				info.useOneX = strings.TrimSpace(v) == "true"
+			}
 		case "authMode":
 			if !gotAuthMode {
 				if s, ok := readCharData(dec); ok {

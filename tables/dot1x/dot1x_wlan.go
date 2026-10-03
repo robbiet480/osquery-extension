@@ -172,21 +172,35 @@ func wlanStatus(c wlanClient, ifname string) (Dot1XStatus, error) {
 
 	s.AuthenticatorMACAddress = macAddrString(conn.AssociationAttributes.Dot11Bssid[:])
 
-	if err := applyOneXSecurity(&s, conn.IsState, conn.SecurityAttributes.OneXEnabled != 0); err != nil {
+	// The profile is fetched lazily and at most once. A fetch failure is
+	// non-fatal: the row is still valid without the profile-derived fields.
+	profileName := utf16ToString(conn.ProfileName[:])
+	var profile wlanProfileInfo
+	haveProfile, fetched := false, false
+	loadProfile := func() bool {
+		if !fetched && profileName != "" {
+			fetched = true
+			if xmlStr, err := c.profileXML(info.guid, profileName); err == nil {
+				profile, haveProfile = parseWLANProfile(xmlStr), true
+			}
+		}
+		return haveProfile
+	}
+
+	// wlanapi only fills SecurityAttributes once the connection completes
+	// (OneXEnabled is 0 while authenticating), so mid-authentication the
+	// profile's <useOneX> decides whether this is an 802.1X connection.
+	oneX := conn.SecurityAttributes.OneXEnabled != 0
+	if !oneX && conn.IsState == wlanIfaceStateAuthenticating && loadProfile() {
+		oneX = profile.useOneX
+	}
+	if err := applyOneXSecurity(&s, conn.IsState, oneX); err != nil {
 		return s, err
 	}
 
-	profileName := utf16ToString(conn.ProfileName[:])
-	if profileName == "" {
+	if !loadProfile() {
 		return s, nil
 	}
-	// A profile fetch failure is non-fatal: the row is still valid without
-	// the profile-derived EAP fields.
-	xmlStr, err := c.profileXML(info.guid, profileName)
-	if err != nil {
-		return s, nil //nolint:nilerr // deliberately non-fatal, see above
-	}
-	profile := parseWLANProfile(xmlStr) // single pass over the XML
 	if profile.eapType > 0 {
 		s.EAPType = profile.eapType
 	}
