@@ -8,11 +8,6 @@ import (
 	"github.com/micromdm/plist"
 )
 
-// knownNetworksPlist is where macOS records joined Wi-Fi networks. It is
-// root-only and Full Disk Access protected, so it is only readable under
-// osqueryd; anywhere else the ssid column stays empty.
-const knownNetworksPlist = "/Library/Preferences/com.apple.wifi.known-networks.plist"
-
 // knownNetworkSSID returns the SSID of the known network that was associated
 // on bssid, the AP the 802.1X session authenticated against. Several networks
 // can share a BSSID (one radio, multiple SSIDs); the most recent association

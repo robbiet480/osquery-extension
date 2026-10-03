@@ -372,6 +372,11 @@ func newBackend() Dot1XBackend {
 	return productionBackend{}
 }
 
+// knownNetworksPlist is where macOS records joined Wi-Fi networks. It is
+// root-only and Full Disk Access protected, so it is only readable under
+// osqueryd; anywhere else the ssid column stays empty.
+const knownNetworksPlist = "/Library/Preferences/com.apple.wifi.known-networks.plist"
+
 func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 	cName := C.CString(ifname)
 	defer C.free(unsafe.Pointer(cName))
