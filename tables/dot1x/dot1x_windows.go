@@ -3,7 +3,9 @@
 package dot1x
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -335,19 +337,29 @@ func enumerateWiredInterfaces() ([]wiredIface, error) {
 	if err != nil {
 		return nil, fmt.Errorf("locating ProgramData: %w", err)
 	}
-	files, err := filepath.Glob(filepath.Join(programData, "Microsoft", "dot3svc", "Profiles", "Interfaces", "*", "*.xml"))
+	root := filepath.Join(programData, "Microsoft", "dot3svc", "Profiles", "Interfaces")
+	dirs, err := os.ReadDir(root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return []wiredIface{}, nil // Wired AutoConfig never configured
+	}
 	if err != nil {
-		return nil, err
+		// Typically access denied when not admin/SYSTEM; don't report "none".
+		return nil, fmt.Errorf("reading Wired AutoConfig profiles: %w", err)
 	}
 	profiles := make(map[string]string) // upper-case "{GUID}" -> profile XML
-	for _, f := range files {
-		guid := strings.ToUpper(filepath.Base(filepath.Dir(f)))
-		if _, ok := profiles[guid]; ok {
-			continue // first (sorted) profile per adapter wins
+	for _, d := range dirs {
+		if !d.IsDir() {
+			continue
 		}
-		if b, err := os.ReadFile(f); err == nil {
-			profiles[guid] = decodeProfileBytes(b)
+		files, err := filepath.Glob(filepath.Join(root, d.Name(), "*.xml"))
+		if err != nil || len(files) == 0 {
+			continue
 		}
+		b, err := os.ReadFile(files[0]) // first (sorted) profile per adapter
+		if err != nil {
+			return nil, fmt.Errorf("reading Wired AutoConfig profile: %w", err)
+		}
+		profiles[strings.ToUpper(d.Name())] = decodeProfileBytes(b)
 	}
 	if len(profiles) == 0 {
 		return []wiredIface{}, nil // no wired 802.1X configured; skip adapter enumeration

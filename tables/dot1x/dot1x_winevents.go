@@ -144,7 +144,13 @@ func applyFailure(s *Dot1XStatus, e winEvent) {
 // (s already carries its identity). If the adapter's newest connection event
 // is an 802.1X failure, it returns a Held row describing it; otherwise
 // errNoActiveConnection (no row). Event log errors count as no events.
-func wlanIdleStatus(c wlanClient, s Dot1XStatus) (Dot1XStatus, error) {
+func wlanIdleStatus(c wlanClient, s Dot1XStatus, ifState uint32) (Dot1XStatus, error) {
+	// Only a disconnected adapter reports its last failure: while it retries
+	// (associating/discovering) or with Wi-Fi off (not ready), an earlier
+	// failure would be stale.
+	if ifState != wlanIfaceStateDisconnected {
+		return s, errNoActiveConnection
+	}
 	e, _, ok := newestFor(bestEffort(c.wlanEvents()), s.UniqueIdentifier, wlanEventIDs...)
 	if !ok || e.ID != evWlanAuthFailed {
 		return s, errNoActiveConnection
@@ -244,8 +250,8 @@ func wiredStatus(w wiredIface, events []winEvent) (Dot1XStatus, error) {
 func windowsInterfaceNames(w wlanClient, d wiredClient) []string {
 	_, wlanNames, wlanErr := w.interfaces()
 	wired, wiredErr := d.wiredInterfaces()
-	if wlanErr != nil && wiredErr != nil {
-		return nil
+	if wlanErr != nil && (wiredErr != nil || len(wired) == 0) {
+		return nil // can't tell "no 802.1X" from "Wi-Fi broken": defaults unknown
 	}
 	names := []string{}
 	seen := map[string]bool{}
@@ -281,7 +287,7 @@ func windowsStatus(w wlanClient, d wiredClient, ifname string) (Dot1XStatus, err
 			return wiredStatus(i, bestEffort(d.wiredEvents()))
 		}
 	}
-	if wlanErr != nil && wiredErr != nil {
+	if wlanErr != nil && (wiredErr != nil || len(wired) == 0) {
 		return Dot1XStatus{Interface: ifname},
 			fmt.Errorf("%w: %w", ErrBackendUnavailable, errors.Join(wlanErr, wiredErr))
 	}

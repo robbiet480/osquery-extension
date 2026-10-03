@@ -148,7 +148,7 @@ func wlanStatus(c wlanClient, ifname string) (Dot1XStatus, error) {
 	// Gate on the enumeration state to avoid querying idle adapters. An idle
 	// adapter still gets a row if its last 802.1X attempt failed.
 	if checkActiveConnection(info.state) != nil {
-		return wlanIdleStatus(c, s)
+		return wlanIdleStatus(c, s, info.state)
 	}
 
 	// The interface reports connected/authenticating, so a failed or empty
@@ -171,7 +171,7 @@ func wlanStatus(c wlanClient, ifname string) (Dot1XStatus, error) {
 	// (auth may have completed in between), so it decides from here on.
 	s.State, s.SupplicantState = mapWlanState(conn.IsState)
 	if checkActiveConnection(conn.IsState) != nil {
-		return wlanIdleStatus(c, s)
+		return wlanIdleStatus(c, s, conn.IsState)
 	}
 
 	s.AuthenticatorMACAddress = macAddrString(conn.AssociationAttributes.Dot11Bssid[:])

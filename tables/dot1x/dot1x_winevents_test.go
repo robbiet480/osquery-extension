@@ -566,3 +566,29 @@ func TestWlanIdleFailureRowSSID(t *testing.T) {
 	applyFailure(&s, loadEvent(t, "wlan-12013"))
 	assert.Equal(t, "dot1x-test", s.SSID)
 }
+
+// A failed Wi-Fi side must not be hidden by a wired side that merely found
+// nothing: the query would look like "no 802.1X here" instead of failing.
+func TestWindowsWlanErrorNotHiddenByEmptyWired(t *testing.T) {
+	t.Parallel()
+	w := &fakeWlanClient{enumErr: errors.New("wlansvc stopped")}
+	d := &fakeWiredClient{ifaces: []wiredIface{}}
+
+	assert.Nil(t, windowsInterfaceNames(w, d), "defaults unknown, so the caller probes and gets the error")
+	_, err := windowsStatus(w, d, "en0")
+	assert.ErrorIs(t, err, ErrBackendUnavailable)
+}
+
+// Only a disconnected adapter reports its last failure. During a retry
+// (associating/discovering) or with Wi-Fi off (not ready), an old 12013
+// would be stale.
+func TestWlanIdleFailureOnlyWhenDisconnected(t *testing.T) {
+	t.Parallel()
+	fail := loadEvent(t, "wlan-12013")
+	for _, st := range []uint32{wlanIfaceStateAssociating, wlanIfaceStateDiscovering, wlanIfaceStateNotReady, wlanIfaceStateDisconnecting} {
+		c := newFake(t, st, connAttrs(st, false, ""), "")
+		c.events = []winEvent{fail}
+		_, err := wlanStatus(c, testIface)
+		assert.ErrorIs(t, err, errNoActiveConnection, "state %d", st)
+	}
+}
