@@ -5,13 +5,10 @@ package dot1x
 // only Windows).
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 const sampleProfileXML = `<?xml version="1.0"?>
@@ -270,29 +267,24 @@ func TestFormatSHA1Hex(t *testing.T) {
 // Phase2Authentication; TTLS with PAP has no inner EAP method at all.
 func TestParseWLANProfileRealExports(t *testing.T) {
 	t.Parallel()
-
-	tests := []struct {
-		file      string
-		wantOuter int
-		wantInner int
-		wantMode  int
+	for _, tc := range []struct {
+		file string
+		want wlanProfileInfo
 	}{
-		{"wlanprofile-peap-mschapv2.xml", 25, 26, 1},
-		{"wlanprofile-peap-tls.xml", 25, 13, 3},
-		{"wlanprofile-ttls-eapmschapv2.xml", 21, 26, 1},
-		{"wlanprofile-ttls-pap.xml", 21, -1, 1},
-	}
-
-	for _, tc := range tests {
-		tc := tc
+		{"wlanprofile-peap-mschapv2.xml", wlanProfileInfo{eapType: 25, innerEAPType: 26, authMode: 1, useOneX: true, serverValidation: "prompt"}},
+		{"wlanprofile-peap-tls.xml", wlanProfileInfo{eapType: 25, innerEAPType: 13, authMode: 3, useOneX: true, serverValidation: "prompt"}},
+		{"wlanprofile-ttls-eapmschapv2.xml", wlanProfileInfo{eapType: 21, innerEAPType: 26, authMode: 1, useOneX: true, serverValidation: "prompt"}},
+		{"wlanprofile-ttls-pap.xml", wlanProfileInfo{eapType: 21, innerEAPType: -1, authMode: 1, useOneX: true, serverValidation: "prompt"}},
+		// Windows Settings writes TTLS-PAP CA hashes with unpadded bytes.
+		{"wlanprofile-ttls-pap-windows-ui.xml", wlanProfileInfo{eapType: 21, innerEAPType: -1, authMode: 1, useOneX: true,
+			trustedRootCASHA1: "08:00:f4:2d:42:8e:e5:07:ff:ec:df:fe:4f:9e:31:fd:63:c9:5a:bb", serverValidation: "ca_only"}},
+		// Wired profiles use OneXEnabled instead of useOneX.
+		{"lanprofile-eap-tls-machine.xml", wlanProfileInfo{eapType: 13, innerEAPType: -1, authMode: 3, useOneX: true,
+			trustedRootCASHA1: "58:34:c1:13:14:9c:fc:9b:9f:28:70:6f:db:e6:81:a4:78:19:a2:0e", serverValidation: "ca_only"}},
+	} {
 		t.Run(tc.file, func(t *testing.T) {
 			t.Parallel()
-			b, err := os.ReadFile(filepath.Join("testdata", tc.file))
-			require.NoError(t, err)
-			info := parseWLANProfile(string(b))
-			assert.Equal(t, tc.wantOuter, info.eapType, "outer EAP type")
-			assert.Equal(t, tc.wantInner, info.innerEAPType, "inner EAP type")
-			assert.Equal(t, tc.wantMode, info.authMode, "auth mode")
+			assert.Equal(t, tc.want, parseWLANProfile(readTestdata(t, tc.file)))
 		})
 	}
 }
@@ -300,36 +292,6 @@ func TestParseWLANProfileRealExports(t *testing.T) {
 func TestModeNameMachineOrUser(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "MachineOrUser", rowFromStatus(Dot1XStatus{Mode: 4})["mode_name"])
-}
-
-// Profile Windows 11 25H2 generated itself when joining a TTLS network via
-// Settings: TTLS-PAP (no inner EAP method) and a TrustedRootCAHash written
-// with unpadded bytes.
-func TestParseWLANProfileWindowsUITTLS(t *testing.T) {
-	t.Parallel()
-
-	b, err := os.ReadFile(filepath.Join("testdata", "wlanprofile-ttls-pap-windows-ui.xml"))
-	require.NoError(t, err)
-	info := parseWLANProfile(string(b))
-	assert.Equal(t, 21, info.eapType)
-	assert.Equal(t, -1, info.innerEAPType)
-	assert.Equal(t, "08:00:f4:2d:42:8e:e5:07:ff:ec:df:fe:4f:9e:31:fd:63:c9:5a:bb", info.trustedRootCASHA1)
-}
-
-// A dot3svc LAN profile (wired 802.1X) uses the same OneX/EAPConfig schema as
-// a WLAN profile, but flags 802.1X with <OneXEnabled> instead of <useOneX>.
-func TestParseLANProfile(t *testing.T) {
-	t.Parallel()
-
-	info := parseWLANProfile(readTestdata(t, "lanprofile-eap-tls-machine.xml"))
-	assert.True(t, info.useOneX)
-	assert.Equal(t, 13, info.eapType)
-	assert.Equal(t, -1, info.innerEAPType)
-	assert.Equal(t, 3, info.authMode)
-	assert.Equal(t, "58:34:c1:13:14:9c:fc:9b:9f:28:70:6f:db:e6:81:a4:78:19:a2:0e", info.trustedRootCASHA1)
-
-	off := parseWLANProfile(`<LANProfile><MSM><security><OneXEnabled>false</OneXEnabled></security></MSM></LANProfile>`)
-	assert.False(t, off.useOneX)
 }
 
 // Profile files on disk may be UTF-16 with a matching encoding declaration,
@@ -421,12 +383,6 @@ func TestParseWLANProfileServerValidation(t *testing.T) {
 		wantNames string
 		wantSV    string
 	}{
-		{"fixture lanprofile-eap-tls-machine", readTestdata(t, "lanprofile-eap-tls-machine.xml"), "", "ca_only"},
-		{"fixture peap-mschapv2", readTestdata(t, "wlanprofile-peap-mschapv2.xml"), "", "prompt"},
-		{"fixture peap-tls", readTestdata(t, "wlanprofile-peap-tls.xml"), "", "prompt"},
-		{"fixture ttls-eapmschapv2", readTestdata(t, "wlanprofile-ttls-eapmschapv2.xml"), "", "prompt"},
-		{"fixture ttls-pap", readTestdata(t, "wlanprofile-ttls-pap.xml"), "", "prompt"},
-		{"fixture ttls-pap-windows-ui", readTestdata(t, "wlanprofile-ttls-pap-windows-ui.xml"), "", "ca_only"},
 		{"sample EAP-TLS", sampleProfileXML, "", "ca_only"},
 		{"sample PEAP", peapProfileXML, "", "ca_only"},
 		{

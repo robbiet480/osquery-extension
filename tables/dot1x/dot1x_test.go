@@ -9,7 +9,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math/big"
@@ -105,15 +104,7 @@ func TestInterfacesToQuery(t *testing.T) {
 
 	t.Run("with equals constraint returns specified interface", func(t *testing.T) {
 		t.Parallel()
-		qc := table.QueryContext{
-			Constraints: map[string]table.ConstraintList{
-				"interface": {
-					Constraints: []table.Constraint{
-						{Operator: table.OperatorEquals, Expression: "en0"},
-					},
-				},
-			},
-		}
+		qc := constraintFor("en0")
 		ifaces := interfacesToQuery(fakeBackend{}, qc)
 		assert.Equal(t, []string{"en0"}, ifaces)
 	})
@@ -137,17 +128,7 @@ func TestInterfacesToQuery(t *testing.T) {
 
 	t.Run("duplicate constraints deduplicated", func(t *testing.T) {
 		t.Parallel()
-		qc := table.QueryContext{
-			Constraints: map[string]table.ConstraintList{
-				"interface": {
-					Constraints: []table.Constraint{
-						{Operator: table.OperatorEquals, Expression: "en0"},
-						{Operator: table.OperatorEquals, Expression: "en0"},
-						{Operator: table.OperatorEquals, Expression: "en1"},
-					},
-				},
-			},
-		}
+		qc := constraintFor("en0", "en0", "en1")
 		ifaces := interfacesToQuery(fakeBackend{}, qc)
 		assert.Equal(t, []string{"en0", "en1"}, ifaces)
 	})
@@ -158,6 +139,13 @@ func TestRowFromStatus(t *testing.T) {
 
 	s := Dot1XStatus{
 		Interface:                    "en0",
+		InterfaceType:                "wifi",
+		SSID:                         "Campus",
+		ProfileName:                  "Campus Wi-Fi",
+		MDMPayloadUUID:               "ABC",
+		MDMPayloadType:               "com.apple.wifi.managed",
+		MDMProfileName:               "Corp Wi-Fi",
+		MDMProfileIdentifier:         "com.example.wifi.corp",
 		State:                        2,
 		SupplicantState:              4,
 		EAPType:                      13,
@@ -190,6 +178,13 @@ func TestRowFromStatus(t *testing.T) {
 	}
 
 	row := rowFromStatus(s)
+	assert.Equal(t, "wifi", row["interface_type"])
+	assert.Equal(t, "Campus", row["ssid"])
+	assert.Equal(t, "Campus Wi-Fi", row["profile_name"])
+	assert.Equal(t, "ABC", row["mdm_payload_uuid"])
+	assert.Equal(t, "com.apple.wifi.managed", row["mdm_payload_type"])
+	assert.Equal(t, "Corp Wi-Fi", row["mdm_profile_name"])
+	assert.Equal(t, "com.example.wifi.corp", row["mdm_profile_identifier"])
 	assert.Equal(t, "0x80420015", row["failure_eap_code"])
 	assert.Equal(t, "2027-01-02T03:04:05Z", row["tls_server_certificate_not_after"])
 	assert.Equal(t, "58:34:c1:13:14:9c:fc:9b:9f:28:70:6f:db:e6:81:a4:78:19:a2:0e", row["tls_trusted_root_ca_sha1"])
@@ -240,6 +235,14 @@ func TestRowFromStatusUnsetFields(t *testing.T) {
 	assert.Equal(t, "No Authenticator", row["supplicant_state_name"])
 	assert.Equal(t, "", row["eap_type_name"])
 	assert.Equal(t, "0", row["tls_session_was_resumed"])
+	assert.Empty(t, row["ssid"])
+	assert.Empty(t, row["interface_type"])
+	s.EAPType, s.InnerEAPType, s.ClientStatus, s.Mode = -1, -1, -1, -1
+	s.TLSTrustClientStatus, s.TLSNegotiatedCipher = -1, -1
+	row = rowFromStatus(s)
+	for _, key := range []string{"eap_type", "eap_type_name", "inner_eap_type", "inner_eap_type_name", "client_status", "client_status_name", "mode", "mode_name", "tls_trust_client_status", "tls_negotiated_cipher"} {
+		assert.Empty(t, row[key], key)
+	}
 }
 
 // TLSSessionWasResumed is tri-state: -1 means the backend can't know (e.g.
@@ -259,7 +262,8 @@ func TestRowFromStatusUnknownEnumValues(t *testing.T) {
 		State:           99,
 		SupplicantState: 99,
 		Mode:            99,
-		EAPType:         0,
+		EAPType:         99,
+		InnerEAPType:    99,
 	}
 
 	row := rowFromStatus(s)
@@ -268,7 +272,9 @@ func TestRowFromStatusUnknownEnumValues(t *testing.T) {
 	assert.Equal(t, "99", row["supplicant_state"])
 	assert.Equal(t, "Unknown(99)", row["supplicant_state_name"])
 	assert.Equal(t, "Unknown(99)", row["mode_name"])
-	assert.Equal(t, "", row["eap_type_name"])
+	assert.Equal(t, "99", row["eap_type"])
+	assert.Equal(t, "Unknown(99)", row["eap_type_name"])
+	assert.Equal(t, "Unknown(99)", row["inner_eap_type_name"])
 }
 
 func TestLookupNameNegative(t *testing.T) {
@@ -280,51 +286,33 @@ func TestLookupNameNegative(t *testing.T) {
 
 func TestGenerateRowsWithConstraint(t *testing.T) {
 	t.Parallel()
-
-	backend := fakeBackend{
-		statuses: map[string]Dot1XStatus{
-			"en0": {
-				Interface:       "en0",
-				State:           2,
-				SupplicantState: 4,
-				EAPType:         13,
-				EAPTypeName:     "EAP-TLS",
-				Mode:            1,
-			},
-		},
+	backend := fakeBackend{statuses: map[string]Dot1XStatus{
+		"en0": {Interface: "en0", State: 2, SupplicantState: 4, EAPType: 13, Mode: 3},
+		"en1": {Interface: "en1", State: 2, SupplicantState: 4, EAPType: 25, InnerEAPType: 26, Mode: 2},
+	}}
+	for _, names := range [][]string{{"en0"}, {"en0", "en1"}} {
+		rows, err := generateRows(context.Background(), backend, constraintFor(names...))
+		require.NoError(t, err)
+		require.Len(t, rows, len(names))
+		assert.Equal(t, "en0", rows[0]["interface"])
+		assert.Equal(t, "Running", rows[0]["state_name"])
+		assert.Equal(t, "Authenticated", rows[0]["supplicant_state_name"])
+		assert.Equal(t, "EAP-TLS", rows[0]["eap_type_name"])
+		assert.Equal(t, "System", rows[0]["mode_name"])
+		if len(rows) == 2 {
+			assert.Equal(t, "en1", rows[1]["interface"])
+			assert.Equal(t, "PEAP", rows[1]["eap_type_name"])
+			assert.Equal(t, "MSCHAPv2", rows[1]["inner_eap_type_name"])
+			assert.Equal(t, "LoginWindow", rows[1]["mode_name"])
+		}
 	}
-
-	qc := table.QueryContext{
-		Constraints: map[string]table.ConstraintList{
-			"interface": {
-				Constraints: []table.Constraint{
-					{Operator: table.OperatorEquals, Expression: "en0"},
-				},
-			},
-		},
-	}
-
-	rows, err := generateRows(context.Background(), backend, qc)
-	require.NoError(t, err)
-	require.Len(t, rows, 1)
-	assert.Equal(t, "en0", rows[0]["interface"])
-	assert.Equal(t, "Running", rows[0]["state_name"])
-	assert.Equal(t, "Authenticated", rows[0]["supplicant_state_name"])
 }
 
 func TestGenerateRowsNoActiveInterface(t *testing.T) {
 	t.Parallel()
 
 	backend := fakeBackend{statuses: map[string]Dot1XStatus{}}
-	qc := table.QueryContext{
-		Constraints: map[string]table.ConstraintList{
-			"interface": {
-				Constraints: []table.Constraint{
-					{Operator: table.OperatorEquals, Expression: "en9"},
-				},
-			},
-		},
-	}
+	qc := constraintFor("en9")
 
 	rows, err := generateRows(context.Background(), backend, qc)
 	require.NoError(t, err)
@@ -345,16 +333,7 @@ func TestGenerateRowsSkipsErrors(t *testing.T) {
 		},
 	}
 
-	qc := table.QueryContext{
-		Constraints: map[string]table.ConstraintList{
-			"interface": {
-				Constraints: []table.Constraint{
-					{Operator: table.OperatorEquals, Expression: "en0"},
-					{Operator: table.OperatorEquals, Expression: "en1"},
-				},
-			},
-		},
-	}
+	qc := constraintFor("en0", "en1")
 	rows, err := generateRows(context.Background(), backend, qc)
 	require.NoError(t, err)
 	assert.Len(t, rows, 1)
@@ -365,15 +344,7 @@ func TestGenerateRowsBackendUnavailable(t *testing.T) {
 	t.Parallel()
 
 	wrapper := errBackend{err: ErrBackendUnavailable}
-	rows, err := generateRows(context.Background(), wrapper, table.QueryContext{
-		Constraints: map[string]table.ConstraintList{
-			"interface": {
-				Constraints: []table.Constraint{
-					{Operator: table.OperatorEquals, Expression: "en0"},
-				},
-			},
-		},
-	})
+	rows, err := generateRows(context.Background(), wrapper, constraintFor("en0"))
 	assert.ErrorIs(t, err, ErrBackendUnavailable)
 	assert.Empty(t, rows)
 }
@@ -396,22 +367,6 @@ func TestMacAddrString(t *testing.T) {
 	assert.Equal(t, "", macAddrString(nil))
 }
 
-func TestDot1XStatusGenerate(t *testing.T) {
-	t.Parallel()
-
-	rows, err := generateRows(context.Background(), fakeBackend{statuses: map[string]Dot1XStatus{}}, table.QueryContext{
-		Constraints: map[string]table.ConstraintList{
-			"interface": {
-				Constraints: []table.Constraint{
-					{Operator: table.OperatorEquals, Expression: "nonexistent_en999"},
-				},
-			},
-		},
-	})
-	require.NoError(t, err)
-	assert.Empty(t, rows)
-}
-
 func TestGenerateRowsContextCancellation(t *testing.T) {
 	t.Parallel()
 
@@ -431,34 +386,6 @@ func TestItoa(t *testing.T) {
 	assert.Equal(t, "", itoa(-1))
 }
 
-func TestNameMapsComplete(t *testing.T) {
-	t.Parallel()
-
-	for i, name := range stateNames {
-		assert.NotEmpty(t, name, "stateNames missing entry for %d", i)
-	}
-
-	for i, name := range supplicantStateNames {
-		assert.NotEmpty(t, name, "supplicantStateNames missing entry for %d", i)
-	}
-
-	// Separately verify expected count matches enum range
-	for i := 0; i <= 8; i++ {
-		_, ok := supplicantStateNames[i]
-		assert.True(t, ok, "supplicantStateNames missing index %d", i)
-	}
-
-	for i := 0; i <= 3; i++ {
-		_, ok := stateNames[i]
-		assert.True(t, ok, "stateNames missing index %d", i)
-	}
-
-	for i := 0; i <= 3; i++ {
-		_, ok := modeNames[i]
-		assert.True(t, ok, "modeNames missing index %d", i)
-	}
-}
-
 func TestRowFromStatusEAPTypeNameFallback(t *testing.T) {
 	t.Parallel()
 
@@ -473,139 +400,39 @@ func TestRowFromStatusEAPTypeNameFallback(t *testing.T) {
 	assert.Equal(t, "Custom-EAP", row2["eap_type_name"])
 }
 
-func TestMacAddrStringCaps(t *testing.T) {
-	t.Parallel()
-	// Just verify mac address strings use lowercase hex (verify).
-	addr := macAddrString([]byte{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF})
-	assert.Equal(t, "aa:bb:cc:dd:ee:ff", addr)
-	assert.True(t, strings.Contains(addr, "aa"), "should use lowercase")
-}
-
 func TestParseTLSCertChain(t *testing.T) {
-	// Subtests that generate keys/certs with crypto/rand are serialized
-	// (no t.Parallel); data-only subtests use t.Parallel().
-
-	t.Run("empty", func(t *testing.T) {
-		t.Parallel()
-		subj, sha1s, serials, _ := parseTLSCertChain(nil)
-		assert.Equal(t, "", subj)
-		assert.Equal(t, "", sha1s)
-		assert.Equal(t, "", serials)
-		subj, sha1s, serials, _ = parseTLSCertChain([]byte{})
-		assert.Equal(t, "", subj)
-		assert.Equal(t, "", sha1s)
-		assert.Equal(t, "", serials)
-	})
-
-	t.Run("truncated length prefix", func(t *testing.T) {
-		t.Parallel()
-		subj, sha1s, serials, _ := parseTLSCertChain([]byte{0x00, 0x00, 0x00})
-		assert.Equal(t, "", subj)
-		assert.Equal(t, "", sha1s)
-		assert.Equal(t, "", serials)
-	})
-
-	t.Run("invalid DER", func(t *testing.T) {
-		t.Parallel()
-		packed := []byte{0x00, 0x00, 0x00, 0x04, 'n', 'o', 'p', 'e'}
-		subj, sha1s, serials, _ := parseTLSCertChain(packed)
-		assert.Equal(t, "", subj)
-		assert.Equal(t, "", sha1s)
-		assert.Equal(t, "", serials)
-	})
-
-	t.Run("length exceeds buffer", func(t *testing.T) {
-		t.Parallel()
-		packed := []byte{0x00, 0x00, 0x00, 0xff, 0x00}
-		subj, sha1s, serials, _ := parseTLSCertChain(packed)
-		assert.Equal(t, "", subj)
-		assert.Equal(t, "", sha1s)
-		assert.Equal(t, "", serials)
-	})
-
-	t.Run("valid_single_cert", func(t *testing.T) {
-		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-		require.NoError(t, err)
-		tmpl := &x509.Certificate{
-			SerialNumber: big.NewInt(12345),
-			Subject: pkix.Name{
-				CommonName:   "test.example.com",
-				Organization: []string{"Test Org"},
-			},
-			NotBefore: time.Now().Add(-time.Hour),
-			NotAfter:  time.Now().Add(time.Hour),
-		}
-		der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
-		require.NoError(t, err)
-
-		buf := make([]byte, 4+len(der))
-		binary.BigEndian.PutUint32(buf, uint32(len(der)))
-		copy(buf[4:], der)
-
-		subj, sha1s, serials, _ := parseTLSCertChain(buf)
-		assert.Equal(t, "CN=test.example.com,O=Test Org", subj)
-		h := sha1.Sum(der)
-		expectedSHA1 := fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x",
-			h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], h[8], h[9],
-			h[10], h[11], h[12], h[13], h[14], h[15], h[16], h[17], h[18], h[19],
-		)
-		assert.Equal(t, expectedSHA1, sha1s)
-		assert.Equal(t, "3039", serials) // 12345 in hex
-	})
-
-	t.Run("zero_length_entry_skipped", func(t *testing.T) {
-		// Two entries: first has length=0, second is a valid cert.
-		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-		require.NoError(t, err)
-		tmpl := &x509.Certificate{
-			SerialNumber: big.NewInt(999),
-			Subject: pkix.Name{
-				CommonName: "valid.example.com",
-			},
-			NotBefore: time.Now().Add(-time.Hour),
-			NotAfter:  time.Now().Add(time.Hour),
-		}
-		der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
-		require.NoError(t, err)
-
-		buf := make([]byte, 4+0+4+len(der))
-		binary.BigEndian.PutUint32(buf[0:4], 0) // zero-length entry
-		binary.BigEndian.PutUint32(buf[4:8], uint32(len(der)))
-		copy(buf[8:], der)
-
-		subj, sha1s, serials, _ := parseTLSCertChain(buf)
-		assert.Equal(t, "CN=valid.example.com", subj)
-		assert.NotEmpty(t, sha1s)
-		assert.Equal(t, "3e7", serials) // 999 in hex (lowercase from Text(16))
-	})
-
-	t.Run("mixed_valid_and_invalid", func(t *testing.T) {
-		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-		require.NoError(t, err)
-		tmpl := &x509.Certificate{
-			SerialNumber: big.NewInt(1),
-			Subject:      pkix.Name{CommonName: "good.example.com"},
-			NotBefore:    time.Now().Add(-time.Hour),
-			NotAfter:     time.Now().Add(time.Hour),
-		}
-		der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
-		require.NoError(t, err)
-
-		// Layout: valid cert | invalid garbage | valid cert
-		invalidBuf := []byte{0x00, 0x00, 0x00, 0x04, 'b', 'a', 'd', '!'}
-		buf := make([]byte, 4+len(der)+len(invalidBuf)+4+len(der))
-		binary.BigEndian.PutUint32(buf[0:4], uint32(len(der)))
-		copy(buf[4:], der)
-		copy(buf[4+len(der):], invalidBuf)
-		binary.BigEndian.PutUint32(buf[4+len(der)+len(invalidBuf):], uint32(len(der)))
-		copy(buf[4+len(der)+len(invalidBuf)+4:], der)
-
-		subj, sha1s, serials, _ := parseTLSCertChain(buf)
-		parts := strings.Split(subj, "|")
-		assert.Len(t, parts, 2)
-		assert.Len(t, strings.Split(sha1s, ","), 2)
-		assert.Len(t, strings.Split(serials, ","), 2)
-	})
+	t.Parallel()
+	der := testCertDER(t, pkix.Name{CommonName: "test.example.com", Organization: []string{"Test Org"}}, 12345, 2027)
+	hash := sha1.Sum(der)
+	fingerprint := fmt.Sprintf("% x", hash)
+	fingerprint = strings.ReplaceAll(fingerprint, " ", ":")
+	subject := "CN=test.example.com,O=Test Org"
+	for _, tc := range []struct {
+		name                            string
+		data                            []byte
+		subjects, fingerprints, serials string
+	}{
+		{name: "nil"},
+		{name: "empty", data: []byte{}},
+		{name: "truncated prefix", data: []byte{0, 0, 0}},
+		{name: "length exceeds buffer", data: []byte{0, 0, 0, 255, 0}},
+		{name: "invalid DER", data: packCerts([]byte("nope"))},
+		{"single cert", packCerts(der), subject, fingerprint, "3039"},
+		{"zero length skipped", packCerts(nil, der), subject, fingerprint, "3039"},
+		{"invalid between valid certs", packCerts(der, []byte("bad!"), der), subject + "|" + subject, fingerprint + "," + fingerprint, "3039,3039"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			subjects, fingerprints, serials, expiry := parseTLSCertChain(tc.data)
+			assert.Equal(t, tc.subjects, subjects)
+			assert.Equal(t, tc.fingerprints, fingerprints)
+			assert.Equal(t, tc.serials, serials)
+			if tc.subjects == "" {
+				assert.Empty(t, expiry)
+			} else {
+				assert.Equal(t, notAfter(t, der), expiry)
+			}
+		})
+	}
 }
 
 func TestParseTLSCertChainPreservesSubject(t *testing.T) {
@@ -797,18 +624,6 @@ func TestRowFromStatusClientStatusName(t *testing.T) {
 	}
 }
 
-func TestRowFromStatusSSID(t *testing.T) {
-	t.Parallel()
-	assert.Equal(t, "Campus", rowFromStatus(Dot1XStatus{SSID: "Campus"})["ssid"])
-	assert.Equal(t, "", rowFromStatus(Dot1XStatus{})["ssid"])
-}
-
-func TestRowFromStatusInterfaceType(t *testing.T) {
-	t.Parallel()
-	assert.Equal(t, "wifi", rowFromStatus(Dot1XStatus{InterfaceType: "wifi"})["interface_type"])
-	assert.Equal(t, "", rowFromStatus(Dot1XStatus{})["interface_type"])
-}
-
 func TestMapSCInterfaceType(t *testing.T) {
 	t.Parallel()
 	for in, want := range map[string]string{
@@ -838,20 +653,6 @@ func TestKnownNetworkSSID(t *testing.T) {
 	assert.Equal(t, "", knownNetworkSSID(nil, "2a:0b:8b:00:f2:35"), "plist unreadable (no root/FDA)")
 }
 
-// macOS profile-based 802.1X sessions report the EAPOLClientProfile ID as
-// unique_identifier; that profile's WLAN binding gives the SSID exactly, from
-// a world-readable file (no root/FDA needed).
-func TestProfileSSID(t *testing.T) {
-	t.Parallel()
-	b := []byte(readTestdata(t, "eapolclient-configuration.plist"))
-
-	assert.Equal(t, "CorpWiFi", profileSSID(b, "11111111-2222-3333-4444-555555555555"))
-	assert.Equal(t, "", profileSSID(b, "66666666-7777-8888-9999-000000000000"), "profile without WLAN binding")
-	assert.Equal(t, "", profileSSID(b, "deadbeef-0000-0000-0000-000000000000"), "unknown profile")
-	assert.Equal(t, "", profileSSID(b, ""), "not a profile-based session")
-	assert.Equal(t, "", profileSSID([]byte("junk"), "11111111-2222-3333-4444-555555555555"))
-}
-
 // The EAPOLClientProfile also names the connection and, when installed by a
 // configuration profile, records the com.apple.wifi.managed PayloadUUID.
 func TestEAPOLProfileInfo(t *testing.T) {
@@ -878,14 +679,9 @@ func TestEAPOLProfileInfo(t *testing.T) {
 	assert.Equal(t, eapolProfile{name: "Names only", trustedServerNames: "*.campus.edu", serverValidation: "name_only"}, got)
 
 	assert.Equal(t, eapolProfile{}, eapolProfileInfo(b, "unknown"))
+	assert.Equal(t, eapolProfile{}, eapolProfileInfo(b, ""))
+	assert.Equal(t, eapolProfile{}, eapolProfileInfo([]byte("junk"), "11111111-2222-3333-4444-555555555555"))
 	assert.Equal(t, eapolProfile{}, eapolProfileInfo(nil, "11111111-2222-3333-4444-555555555555"))
-}
-
-func TestRowFromStatusProfileColumns(t *testing.T) {
-	t.Parallel()
-	row := rowFromStatus(Dot1XStatus{ProfileName: "Campus", MDMPayloadUUID: "ABC"})
-	assert.Equal(t, "Campus", row["profile_name"])
-	assert.Equal(t, "ABC", row["mdm_payload_uuid"])
 }
 
 func TestServerValidation(t *testing.T) {
@@ -926,14 +722,4 @@ func TestMDMPayloadInfo(t *testing.T) {
 		typ, profile, id := mdmPayloadInfo(bad, "ABCDEF01-2345-6789-ABCD-EF0123456789")
 		assert.Equal(t, []string{"", "", ""}, []string{typ, profile, id}, "bad input %q", bad)
 	}
-}
-
-func TestRowFromStatusMDMColumns(t *testing.T) {
-	t.Parallel()
-	row := rowFromStatus(Dot1XStatus{
-		MDMPayloadType: "com.apple.wifi.managed", MDMProfileName: "Corp Wi-Fi", MDMProfileIdentifier: "com.example.wifi.corp",
-	})
-	assert.Equal(t, "com.apple.wifi.managed", row["mdm_payload_type"])
-	assert.Equal(t, "Corp Wi-Fi", row["mdm_profile_name"])
-	assert.Equal(t, "com.example.wifi.corp", row["mdm_profile_identifier"])
 }

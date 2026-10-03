@@ -120,11 +120,6 @@ func eapolProfileInfo(plistData []byte, profileID string) eapolProfile {
 	return out
 }
 
-// profileSSID returns the SSID bound to profileID, or "".
-func profileSSID(plistData []byte, profileID string) string {
-	return eapolProfileInfo(plistData, profileID).ssid
-}
-
 // mdmPayloadInfo finds the payload whose PayloadUUID matches payloadUUID
 // (case-insensitive) in `profiles -C -o stdout-xml` output (scope, e.g.
 // "_computerlevel" or a user name -> profiles -> ProfileItems) and returns its

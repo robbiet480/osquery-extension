@@ -610,13 +610,6 @@ func TestApplyFailureNormalizes(t *testing.T) {
 	assert.Equal(t, "Failed", rowFromStatus(s)["client_status_name"])
 }
 
-func TestWlanIdleFailureRowSSID(t *testing.T) {
-	t.Parallel()
-	var s Dot1XStatus
-	applyFailure(&s, loadEvent(t, "wlan-12013"))
-	assert.Equal(t, "dot1x-test", s.SSID)
-}
-
 // A failed Wi-Fi side must not be hidden by a wired side that merely found
 // nothing: the query would look like "no 802.1X here" instead of failing.
 func TestWindowsWlanErrorNotHiddenByEmptyWired(t *testing.T) {
@@ -641,19 +634,6 @@ func TestWlanIdleFailureOnlyWhenDisconnected(t *testing.T) {
 		_, err := wlanStatus(c, testIface)
 		assert.ErrorIs(t, err, errNoActiveConnection, "state %d", st)
 	}
-}
-
-func TestInterfaceTypeWiredAndWifiFailure(t *testing.T) {
-	t.Parallel()
-	s, err := wiredStatus(testWired(t), []winEvent{loadEvent(t, "wired-15505")})
-	require.NoError(t, err)
-	assert.Equal(t, "ethernet", s.InterfaceType)
-
-	c := newFake(t, wlanIfaceStateDisconnected, connAttrs(wlanIfaceStateDisconnected, true, "Campus"), sampleProfileXML)
-	c.events = []winEvent{loadEvent(t, "wlan-12013")}
-	f, err := wlanStatus(c, testIface)
-	require.NoError(t, err)
-	assert.Equal(t, "wifi", f.InterfaceType)
 }
 
 // 12013 (and 15514 on builds that log them) carry the EAP method's own

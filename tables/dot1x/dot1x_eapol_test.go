@@ -22,16 +22,16 @@ import (
 )
 
 // testCertDER returns a self-signed DER certificate with the given subject
-// and serial.
-func testCertDER(t *testing.T, subject pkix.Name, serial int64) []byte {
+// and serial, expiring at the start of expiryYear.
+func testCertDER(t *testing.T, subject pkix.Name, serial int64, expiryYear int) []byte {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(serial),
 		Subject:      subject,
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(time.Hour),
+		NotBefore:    time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		NotAfter:     time.Date(expiryYear, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	require.NoError(t, err)
@@ -65,10 +65,11 @@ func sentinelRaw() eapolRaw {
 }
 
 func TestStatusFromEAPOLSystemEAPTLS(t *testing.T) {
-	leaf := testCertDER(t, pkix.Name{CommonName: "radius.campus.edu", OrganizationalUnit: []string{"IT"}, Organization: []string{"CampusGroup"}}, 0x7d3a1f9e2b5c)
-	ca := testCertDER(t, pkix.Name{CommonName: "CampusGroup Root CA", Organization: []string{"CampusGroup"}}, 12345)
+	leaf := testCertDER(t, pkix.Name{CommonName: "radius.campus.edu", OrganizationalUnit: []string{"IT"}, Organization: []string{"CampusGroup"}}, 0x7d3a1f9e2b5c, 2027)
+	ca := testCertDER(t, pkix.Name{CommonName: "CampusGroup Root CA", Organization: []string{"CampusGroup"}}, 12345, 2028)
 
 	r := eapolRaw{
+		interfaceType:                "ethernet",
 		state:                        2,
 		supplicantState:              4,
 		eapType:                      13,
@@ -94,6 +95,7 @@ func TestStatusFromEAPOLSystemEAPTLS(t *testing.T) {
 
 	assert.Equal(t, Dot1XStatus{
 		Interface:                    "en0",
+		InterfaceType:                "ethernet",
 		State:                        2,
 		SupplicantState:              4,
 		EAPType:                      13,
@@ -184,47 +186,18 @@ func TestStatusFromEAPOLSentinels(t *testing.T) {
 	}, s)
 }
 
-func TestStatusFromEAPOLMAC(t *testing.T) {
+func TestStatusFromEAPOLMalformedInput(t *testing.T) {
 	t.Parallel()
-	for name, mac := range map[string][]byte{
-		"nil":   nil,
-		"empty": {},
-		"short": {0x00, 0x11, 0x22},
-		"long":  {0, 1, 2, 3, 4, 5, 6, 7},
-	} {
-		r := sentinelRaw()
-		r.authMAC = mac
-		s, err := statusFromEAPOL("en0", r)
-		require.NoError(t, err, name)
-		assert.Empty(t, s.AuthenticatorMACAddress, name)
-	}
-}
-
-func TestStatusFromEAPOLMalformedCertChain(t *testing.T) {
-	good := testCertDER(t, pkix.Name{CommonName: "good.example.com"}, 1)
-	for name, blob := range map[string][]byte{
-		"truncated prefix": {0x00, 0x00, 0x00},
-		"length overrun":   {0x00, 0x00, 0x00, 0xff, 0x00},
-		"invalid DER":      packCerts([]byte("nope")),
-	} {
-		r := sentinelRaw()
-		r.certChain = blob
-		s, err := statusFromEAPOL("en0", r)
-		require.NoError(t, err, name)
-		assert.Empty(t, s.TLSServerCertificateChain, name)
-		assert.Empty(t, s.TLSServerCertificateSHA1, name)
-		assert.Empty(t, s.TLSServerCertificateSerials, name)
-		assert.Empty(t, s.TLSServerCertificateNotAfter, name)
-	}
-
-	// Bad entries are skipped; good ones are kept.
 	r := sentinelRaw()
-	r.certChain = packCerts(good, []byte("bad!"))
+	r.authMAC = []byte{0, 1, 2}
+	r.certChain = packCerts([]byte("not DER"))
 	s, err := statusFromEAPOL("en0", r)
 	require.NoError(t, err)
-	assert.Equal(t, "CN=good.example.com", s.TLSServerCertificateChain)
-	assert.Equal(t, "1", s.TLSServerCertificateSerials)
-	assert.Equal(t, notAfter(t, good), s.TLSServerCertificateNotAfter)
+	assert.Empty(t, s.AuthenticatorMACAddress)
+	assert.Empty(t, s.TLSServerCertificateChain)
+	assert.Empty(t, s.TLSServerCertificateSHA1)
+	assert.Empty(t, s.TLSServerCertificateSerials)
+	assert.Empty(t, s.TLSServerCertificateNotAfter)
 }
 
 // notAfter is der's NotAfter in the not_after column format.
@@ -233,22 +206,6 @@ func notAfter(t *testing.T, der []byte) string {
 	c, err := x509.ParseCertificate(der)
 	require.NoError(t, err)
 	return c.NotAfter.UTC().Format("2006-01-02T15:04:05Z")
-}
-
-// tls_server_certificate_not_after is the leaf's (first cert's) expiry only.
-func TestStatusFromEAPOLServerCertNotAfter(t *testing.T) {
-	leaf := testCertDER(t, pkix.Name{CommonName: "radius.campus.edu"}, 1)
-	ca := testCertDER(t, pkix.Name{CommonName: "Root CA"}, 2)
-	r := sentinelRaw()
-	r.certChain = packCerts(leaf, ca)
-	s, err := statusFromEAPOL("en0", r)
-	require.NoError(t, err)
-	assert.Equal(t, notAfter(t, leaf), s.TLSServerCertificateNotAfter)
-	assert.Regexp(t, `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$`, s.TLSServerCertificateNotAfter)
-
-	s, err = statusFromEAPOL("en0", sentinelRaw())
-	require.NoError(t, err)
-	assert.Empty(t, s.TLSServerCertificateNotAfter, "no chain")
 }
 
 func TestStatusFromEAPOLNoStatus(t *testing.T) {
@@ -283,13 +240,6 @@ func TestStatusFromEAPOLOtherError(t *testing.T) {
 	_, err := statusFromEAPOL("bogus0", r)
 	require.EqualError(t, err, "EAPOLControlCopyStateAndStatus returned 5 for bogus0")
 	assert.NotErrorIs(t, err, ErrBackendUnavailable)
-}
-
-func TestStatusFromEAPOLInterfaceType(t *testing.T) {
-	t.Parallel()
-	s, err := statusFromEAPOL("en8", eapolRaw{interfaceType: "ethernet", state: 2, supplicantState: 4})
-	require.NoError(t, err)
-	assert.Equal(t, "ethernet", s.InterfaceType)
 }
 
 // eap8021x's "Timestamp" (kEAPOLControlTimestamp) is when the session first

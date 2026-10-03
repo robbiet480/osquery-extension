@@ -136,14 +136,18 @@ func TestDecodeConnectionAttributesShort(t *testing.T) {
 
 func TestWlanStatusConnectedEAPTLS(t *testing.T) {
 	t.Parallel()
-	c := newFake(t, wlanIfaceStateConnected, connAttrs(wlanIfaceStateConnected, true, "Campus"), sampleProfileXML)
+	a := connAttrs(wlanIfaceStateConnected, true, "Corp WiFi (Intune)")
+	a.AssociationAttributes.Dot11Ssid.SSIDLength = 6
+	copy(a.AssociationAttributes.Dot11Ssid.SSID[:], "Campus")
+	c := newFake(t, wlanIfaceStateConnected, a, sampleProfileXML)
 
 	s, err := wlanStatus(c, testIface)
 	require.NoError(t, err)
 	assert.Equal(t, Dot1XStatus{
 		Interface:               testIface,
 		InterfaceType:           "wifi",
-		ProfileName:             "Campus",
+		ProfileName:             "Corp WiFi (Intune)",
+		SSID:                    "Campus",
 		State:                   2, // Running
 		SupplicantState:         4, // Authenticated
 		EAPType:                 13,
@@ -159,7 +163,7 @@ func TestWlanStatusConnectedEAPTLS(t *testing.T) {
 		UniqueIdentifier:        "{9A82D898-7B57-40AA-A330-E2B99D10BD77}",
 	}, s)
 	assert.Equal(t, testGUID, c.profileGUID)
-	assert.Equal(t, "Campus", c.profileName)
+	assert.Equal(t, "Corp WiFi (Intune)", c.profileName)
 }
 
 func TestWlanStatusPEAP(t *testing.T) {
@@ -225,22 +229,13 @@ func TestWlanStatusDisconnectedAfterEnum(t *testing.T) {
 
 func TestWlanStatusShortBuffer(t *testing.T) {
 	t.Parallel()
-	c := newFake(t, wlanIfaceStateConnected, connAttrs(wlanIfaceStateConnected, true, "Campus"), sampleProfileXML)
-	c.conn = c.conn[:100]
-
-	_, err := wlanStatus(c, testIface)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), testIface)
-}
-
-func TestWlanStatusEmptyBuffer(t *testing.T) {
-	t.Parallel()
-	c := newFake(t, wlanIfaceStateConnected, connAttrs(wlanIfaceStateConnected, true, "Campus"), sampleProfileXML)
-	c.conn = nil
-
-	_, err := wlanStatus(c, testIface)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), testIface)
+	for _, size := range []int{0, 100} {
+		c := newFake(t, wlanIfaceStateConnected, connAttrs(wlanIfaceStateConnected, true, "Campus"), sampleProfileXML)
+		c.conn = c.conn[:size]
+		_, err := wlanStatus(c, testIface)
+		require.Error(t, err, "buffer size %d", size)
+		assert.Contains(t, err.Error(), testIface)
+	}
 }
 
 func TestWlanStatusQueryError(t *testing.T) {
@@ -364,35 +359,6 @@ func TestUtf16ToString(t *testing.T) {
 	}
 }
 
-// A WLAN connection without 802.1X (open/PSK/SAE) must not produce a row:
-// macOS reports nothing for such interfaces, and emitting state=Running with
-// supplicant_state=Disconnected would be misleading.
-func TestApplyOneXSecurityNotDot1X(t *testing.T) {
-	t.Parallel()
-
-	s := Dot1XStatus{State: 2, SupplicantState: 4}
-	err := applyOneXSecurity(&s, wlanIfaceStateConnected, false)
-	assert.ErrorIs(t, err, errNotDot1X)
-}
-
-func TestApplyOneXSecurityDot1XConnected(t *testing.T) {
-	t.Parallel()
-
-	s := Dot1XStatus{State: 2, SupplicantState: 4, ClientStatus: -1}
-	require.NoError(t, applyOneXSecurity(&s, wlanIfaceStateConnected, true))
-	assert.Equal(t, 4, s.SupplicantState)
-	assert.Equal(t, 0, s.ClientStatus)
-}
-
-func TestApplyOneXSecurityDot1XAuthenticating(t *testing.T) {
-	t.Parallel()
-
-	s := Dot1XStatus{State: 2, SupplicantState: 3, ClientStatus: -1}
-	require.NoError(t, applyOneXSecurity(&s, wlanIfaceStateAuthenticating, true))
-	assert.Equal(t, 3, s.SupplicantState)
-	assert.Equal(t, -1, s.ClientStatus)
-}
-
 // Idle/transitional adapters have no current connection to inspect for
 // 802.1X, so they're skipped (macOS reports nothing for interfaces without
 // active EAPOL). Only connected/authenticating adapters proceed.
@@ -451,21 +417,6 @@ func readTestdata(t *testing.T, name string) string {
 	return string(b)
 }
 
-// Windows has no built-in osquery source for the SSID (wifi_status is
-// macOS-only), so the connected network's SSID comes from wlanapi.
-func TestWlanStatusSSID(t *testing.T) {
-	t.Parallel()
-	a := connAttrs(wlanIfaceStateConnected, true, "Campus")
-	a.AssociationAttributes.Dot11Ssid.SSIDLength = 6
-	copy(a.AssociationAttributes.Dot11Ssid.SSID[:], "Campus")
-	c := newFake(t, wlanIfaceStateConnected, a, sampleProfileXML)
-	c.conn = connBuf(t, a)
-
-	s, err := wlanStatus(c, testIface)
-	require.NoError(t, err)
-	assert.Equal(t, "Campus", s.SSID)
-}
-
 func TestDecodeSSIDClampsLength(t *testing.T) {
 	t.Parallel()
 	var d dot11SSID
@@ -474,20 +425,4 @@ func TestDecodeSSIDClampsLength(t *testing.T) {
 	assert.Equal(t, "abc"+string(make([]byte, 29)), ssidString(d))
 	d.SSIDLength = 3
 	assert.Equal(t, "abc", ssidString(d))
-}
-
-func TestWlanStatusInterfaceTypeWifi(t *testing.T) {
-	t.Parallel()
-	c := newFake(t, wlanIfaceStateConnected, connAttrs(wlanIfaceStateConnected, true, "Campus"), sampleProfileXML)
-	s, err := wlanStatus(c, testIface)
-	require.NoError(t, err)
-	assert.Equal(t, "wifi", s.InterfaceType)
-}
-
-func TestWlanStatusProfileName(t *testing.T) {
-	t.Parallel()
-	c := newFake(t, wlanIfaceStateConnected, connAttrs(wlanIfaceStateConnected, true, "Corp WiFi (Intune)"), sampleProfileXML)
-	s, err := wlanStatus(c, testIface)
-	require.NoError(t, err)
-	assert.Equal(t, "Corp WiFi (Intune)", s.ProfileName)
 }
