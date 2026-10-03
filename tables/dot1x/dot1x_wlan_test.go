@@ -143,6 +143,7 @@ func TestWlanStatusConnectedEAPTLS(t *testing.T) {
 	assert.Equal(t, Dot1XStatus{
 		Interface:               testIface,
 		InterfaceType:           "wifi",
+		ProfileName:             "Campus",
 		State:                   2, // Running
 		SupplicantState:         4, // Authenticated
 		EAPType:                 13,
@@ -480,4 +481,12 @@ func TestWlanStatusInterfaceTypeWifi(t *testing.T) {
 	s, err := wlanStatus(c, testIface)
 	require.NoError(t, err)
 	assert.Equal(t, "wifi", s.InterfaceType)
+}
+
+func TestWlanStatusProfileName(t *testing.T) {
+	t.Parallel()
+	c := newFake(t, wlanIfaceStateConnected, connAttrs(wlanIfaceStateConnected, true, "Corp WiFi (Intune)"), sampleProfileXML)
+	s, err := wlanStatus(c, testIface)
+	require.NoError(t, err)
+	assert.Equal(t, "Corp WiFi (Intune)", s.ProfileName)
 }

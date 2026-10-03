@@ -181,6 +181,7 @@ func wlanStatus(c wlanClient, ifname string) (Dot1XStatus, error) {
 	// The profile is fetched lazily and at most once. A fetch failure is
 	// non-fatal: the row is still valid without the profile-derived fields.
 	profileName := utf16ToString(conn.ProfileName[:])
+	s.ProfileName = profileName
 	var profile wlanProfileInfo
 	haveProfile, fetched := false, false
 	loadProfile := func() bool {

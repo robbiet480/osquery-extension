@@ -8,6 +8,11 @@
 		<key>11111111-2222-3333-4444-555555555555</key>
 		<dict>
 			<key>UserDefinedName</key><string>WiFi (CorpWiFi)</string>
+			<key>Information</key>
+			<dict>
+				<key>com.apple.mcx.configurationprofiles.8021X</key>
+				<dict><key>PayloadUUID</key><string>ABCDEF01-2345-6789-ABCD-EF0123456789</string></dict>
+			</dict>
 			<key>WLAN</key>
 			<dict>
 				<key>SSID</key><data>Q29ycFdpRmk=</data>

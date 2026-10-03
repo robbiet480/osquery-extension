@@ -22,7 +22,9 @@ import (
 type Dot1XStatus struct {
 	Interface                    string
 	InterfaceType                string // "wifi", "ethernet", or "" if unknown
-	SSID                         string // Windows Wi-Fi only; on macOS join wifi_status
+	SSID                         string // Wi-Fi network name
+	ProfileName                  string // WLAN profile (Windows) / EAPOLClientProfile (macOS) name
+	MDMPayloadUUID               string // macOS: com.apple.wifi.managed PayloadUUID behind the profile
 	State                        int    // EAPOLControlState: 0=Idle,1=Starting,2=Running,3=Stopping
 	SupplicantState              int    // 802.1X supplicant state machine value
 	EAPType                      int    // EAP method code (e.g. 13=TLS)
@@ -152,6 +154,8 @@ func Dot1XStatusColumns() []table.ColumnDefinition {
 		table.TextColumn("interface"),
 		table.TextColumn("interface_type"),
 		table.TextColumn("ssid"),
+		table.TextColumn("profile_name"),
+		table.TextColumn("mdm_payload_uuid"),
 		table.IntegerColumn("state"),
 		table.TextColumn("state_name"),
 		table.IntegerColumn("supplicant_state"),
@@ -275,6 +279,8 @@ func rowFromStatus(s Dot1XStatus) map[string]string {
 		"interface":                       s.Interface,
 		"interface_type":                  s.InterfaceType,
 		"ssid":                            s.SSID,
+		"profile_name":                    s.ProfileName,
+		"mdm_payload_uuid":                s.MDMPayloadUUID,
 		"state":                           itoa(s.State),
 		"state_name":                      lookupName(stateNames, s.State),
 		"supplicant_state":                itoa(s.SupplicantState),

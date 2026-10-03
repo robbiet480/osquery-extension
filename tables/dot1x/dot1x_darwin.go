@@ -381,24 +381,26 @@ const knownNetworksPlist = "/Library/Preferences/com.apple.wifi.known-networks.p
 // (world-readable).
 const eapolClientConfigPlist = "/Library/Preferences/SystemConfiguration/com.apple.network.eapolclient.configuration.plist"
 
-// darwinSSID resolves the SSID of a Wi-Fi 802.1X session, which the EAPOL
-// status doesn't carry: first exactly from the session's EAPOLClientProfile
-// (profile-based / MDM networks report its ID as UniqueIdentifier), then by
-// matching the BSSID against known networks (root + Full Disk Access).
-func darwinSSID(s Dot1XStatus) string {
+// applyDarwinProfile fills ssid, profile_name and mdm_payload_uuid, which the
+// EAPOL status doesn't carry: exactly from the session's EAPOLClientProfile
+// when it is profile-based (UniqueIdentifier is the profile ID), with the
+// SSID otherwise matched from the BSSID against known networks (root + Full
+// Disk Access).
+func applyDarwinProfile(s *Dot1XStatus) {
 	if s.UniqueIdentifier != "" {
 		if b, err := os.ReadFile(eapolClientConfigPlist); err == nil {
-			if ssid := profileSSID(b, s.UniqueIdentifier); ssid != "" {
-				return ssid
+			p := eapolProfileInfo(b, s.UniqueIdentifier)
+			s.ProfileName, s.MDMPayloadUUID = p.name, p.payloadUUID
+			if s.InterfaceType == "wifi" {
+				s.SSID = p.ssid
 			}
 		}
 	}
-	if s.AuthenticatorMACAddress != "" {
+	if s.SSID == "" && s.InterfaceType == "wifi" && s.AuthenticatorMACAddress != "" {
 		if b, err := os.ReadFile(knownNetworksPlist); err == nil {
-			return knownNetworkSSID(b, s.AuthenticatorMACAddress)
+			s.SSID = knownNetworkSSID(b, s.AuthenticatorMACAddress)
 		}
 	}
-	return ""
 }
 
 func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
@@ -497,8 +499,8 @@ func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 	}
 
 	s, err := statusFromEAPOL(ifname, r)
-	if err == nil && s.InterfaceType == "wifi" {
-		s.SSID = darwinSSID(s)
+	if err == nil {
+		applyDarwinProfile(&s)
 	}
 	return s, err
 }

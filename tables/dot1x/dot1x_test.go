@@ -51,7 +51,7 @@ func (s stubLister) interfaceNames() []string { return s.names }
 func TestDot1XStatusColumns(t *testing.T) {
 	t.Parallel()
 	want := []string{
-		"interface", "interface_type", "ssid", "state", "state_name",
+		"interface", "interface_type", "ssid", "profile_name", "mdm_payload_uuid", "state", "state_name",
 		"supplicant_state", "supplicant_state_name",
 		"eap_type", "eap_type_name",
 		"client_status", "client_status_name",
@@ -809,4 +809,27 @@ func TestProfileSSID(t *testing.T) {
 	assert.Equal(t, "", profileSSID(b, "deadbeef-0000-0000-0000-000000000000"), "unknown profile")
 	assert.Equal(t, "", profileSSID(b, ""), "not a profile-based session")
 	assert.Equal(t, "", profileSSID([]byte("junk"), "11111111-2222-3333-4444-555555555555"))
+}
+
+// The EAPOLClientProfile also names the connection and, when installed by a
+// configuration profile, records the com.apple.wifi.managed PayloadUUID.
+func TestEAPOLProfileInfo(t *testing.T) {
+	t.Parallel()
+	b := []byte(readTestdata(t, "eapolclient-configuration.plist"))
+
+	got := eapolProfileInfo(b, "11111111-2222-3333-4444-555555555555")
+	assert.Equal(t, eapolProfile{ssid: "CorpWiFi", name: "WiFi (CorpWiFi)", payloadUUID: "ABCDEF01-2345-6789-ABCD-EF0123456789"}, got)
+
+	got = eapolProfileInfo(b, "66666666-7777-8888-9999-000000000000")
+	assert.Equal(t, eapolProfile{name: "Wired (no WLAN)"}, got, "no WLAN binding, not from MDM")
+
+	assert.Equal(t, eapolProfile{}, eapolProfileInfo(b, "unknown"))
+	assert.Equal(t, eapolProfile{}, eapolProfileInfo(nil, "11111111-2222-3333-4444-555555555555"))
+}
+
+func TestRowFromStatusProfileColumns(t *testing.T) {
+	t.Parallel()
+	row := rowFromStatus(Dot1XStatus{ProfileName: "Campus", MDMPayloadUUID: "ABC"})
+	assert.Equal(t, "Campus", row["profile_name"])
+	assert.Equal(t, "ABC", row["mdm_payload_uuid"])
 }

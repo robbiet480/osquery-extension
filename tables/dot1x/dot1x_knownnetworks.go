@@ -59,27 +59,45 @@ func padMAC(s string) string {
 	return strings.Join(parts, ":")
 }
 
-// profileSSID returns the SSID bound to an EAPOLClientProfile in eap8021x's
-// client configuration (Profiles -> <ProfileID> -> WLAN -> SSID). A
-// profile-based session (typically MDM-deployed) reports that ProfileID as
-// its UniqueIdentifier, so this identifies the network exactly. Returns ""
-// for unknown profiles, profiles without a WLAN binding, or bad input.
-func profileSSID(plistData []byte, profileID string) string {
+// eapolProfile is what eap8021x's client configuration records for one
+// EAPOLClientProfile.
+type eapolProfile struct {
+	ssid        string // WLAN binding
+	name        string // UserDefinedName
+	payloadUUID string // com.apple.wifi.managed PayloadUUID, if installed by a configuration profile
+}
+
+// eapolProfileInfo looks up profileID in eap8021x's client configuration
+// (Profiles -> <ProfileID>). A profile-based session (typically
+// MDM-deployed) reports that ProfileID as its UniqueIdentifier, so this
+// identifies the network exactly; the file is world-readable. Zero value
+// for unknown profiles or bad input.
+func eapolProfileInfo(plistData []byte, profileID string) eapolProfile {
+	var out eapolProfile
 	if profileID == "" || len(plistData) == 0 {
-		return ""
+		return out
 	}
 	var cfg map[string]any
 	if plist.Unmarshal(plistData, &cfg) != nil {
-		return ""
+		return out
 	}
 	profiles, _ := cfg["Profiles"].(map[string]any)
 	profile, _ := profiles[profileID].(map[string]any)
+	out.name, _ = profile["UserDefinedName"].(string)
 	wlan, _ := profile["WLAN"].(map[string]any)
 	switch ssid := wlan["SSID"].(type) {
 	case []byte:
-		return string(ssid)
+		out.ssid = string(ssid)
 	case string:
-		return ssid
+		out.ssid = ssid
 	}
-	return ""
+	info, _ := profile["Information"].(map[string]any)
+	mcx, _ := info["com.apple.mcx.configurationprofiles.8021X"].(map[string]any)
+	out.payloadUUID, _ = mcx["PayloadUUID"].(string)
+	return out
+}
+
+// profileSSID returns the SSID bound to profileID, or "".
+func profileSSID(plistData []byte, profileID string) string {
+	return eapolProfileInfo(plistData, profileID).ssid
 }
