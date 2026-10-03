@@ -779,3 +779,20 @@ func TestMapSCInterfaceType(t *testing.T) {
 		assert.Equal(t, want, mapSCInterfaceType(in), in)
 	}
 }
+
+// macOS SSID: match the EAPOL authenticator (the AP BSSID) against the
+// BSSIDs each known network was associated on. BSSIDs in the plist may be
+// unpadded ("2a:b:8b:0:f2:35"); several networks can share a BSSID (one radio,
+// multiple SSIDs), in which case the most recent association wins.
+func TestKnownNetworkSSID(t *testing.T) {
+	t.Parallel()
+	b := []byte(readTestdata(t, "known-networks.plist"))
+
+	assert.Equal(t, "CorpWiFi", knownNetworkSSID(b, "2a:0b:8b:00:f2:35"), "shared BSSID: newest association wins")
+	assert.Equal(t, "CorpWiFi", knownNetworkSSID(b, "26:0B:8B:00:F2:34"), "case-insensitive, padded vs unpadded")
+	assert.Equal(t, "Home", knownNetworkSSID(b, "1c:0b:8b:00:f2:34"))
+	assert.Equal(t, "", knownNetworkSSID(b, "de:ad:be:ef:00:01"), "unknown BSSID")
+	assert.Equal(t, "", knownNetworkSSID(b, ""), "no authenticator")
+	assert.Equal(t, "", knownNetworkSSID([]byte("not a plist"), "2a:0b:8b:00:f2:35"))
+	assert.Equal(t, "", knownNetworkSSID(nil, "2a:0b:8b:00:f2:35"), "plist unreadable (no root/FDA)")
+}

@@ -355,6 +355,7 @@ static char* sc_interface_type(const char* bsd) {
 import "C"
 import (
 	"net"
+	"os"
 	"regexp"
 	"strconv"
 	"sync"
@@ -466,7 +467,14 @@ func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 		C.free(p) // free(NULL) is a no-op
 	}
 
-	return statusFromEAPOL(ifname, r)
+	s, err := statusFromEAPOL(ifname, r)
+	if err == nil && s.InterfaceType == "wifi" && s.AuthenticatorMACAddress != "" {
+		// Needs root + Full Disk Access (osqueryd); otherwise ssid stays empty.
+		if b, rerr := os.ReadFile(knownNetworksPlist); rerr == nil {
+			s.SSID = knownNetworkSSID(b, s.AuthenticatorMACAddress)
+		}
+	}
+	return s, err
 }
 
 // defaultInterfaces returns the real en* interfaces on this host, falling back
