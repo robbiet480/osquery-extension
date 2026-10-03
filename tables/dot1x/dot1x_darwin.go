@@ -332,7 +332,6 @@ int dot1x_query(
 */
 import "C"
 import (
-	"fmt"
 	"net"
 	"regexp"
 	"strconv"
@@ -401,87 +400,44 @@ func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 		&cUniqueID,
 	)
 
-	s := Dot1XStatus{
-		Interface:            ifname,
-		State:                int(cState),
-		SupplicantState:      int(cSupplicantState),
-		EAPType:              int(cEAPType),
-		ClientStatus:         int(cClientStatus),
-		Mode:                 int(cMode),
-		TLSSessionWasResumed: int(cTLSResumed),
+	r := eapolRaw{
+		ret:                          int(ret),
+		state:                        int(cState),
+		supplicantState:              int(cSupplicantState),
+		eapType:                      int(cEAPType),
+		eapTypeName:                  C.GoString(cEAPTypeName),
+		clientStatus:                 int(cClientStatus),
+		domainSpecificError:          int(cDomainError),
+		domainSpecificErrorPresent:   cDomainErrorSet != 0,
+		mode:                         int(cMode),
+		tlsSessionWasResumed:         int(cTLSResumed),
+		tlsTrustClientStatus:         int(cTLSTrustStatus),
+		tlsNegotiatedCipher:          int(cTLSCipher),
+		tlsNegotiatedProtocolVersion: C.GoString(cTLSProtoVersion),
+		innerEAPType:                 int(cInnerEAPType),
+		innerEAPTypeName:             C.GoString(cInnerEAPTypeName),
+		lastStatusTimestamp:          C.GoString(cLastTimestamp),
+		uniqueIdentifier:             C.GoString(cUniqueID),
 	}
-
-	if cDomainErrorSet != 0 {
-		v := int(cDomainError)
-		s.DomainSpecificError = &v
-	}
-
-	defer func() {
-		if cEAPTypeName != nil {
-			C.free(unsafe.Pointer(cEAPTypeName))
-		}
-		if cAuthMAC != nil {
-			C.free(unsafe.Pointer(cAuthMAC))
-		}
-		if cCertChainData != nil {
-			C.free(unsafe.Pointer(cCertChainData))
-		}
-		if cTLSProtoVersion != nil {
-			C.free(unsafe.Pointer(cTLSProtoVersion))
-		}
-		if cInnerEAPTypeName != nil {
-			C.free(unsafe.Pointer(cInnerEAPTypeName))
-		}
-		if cLastTimestamp != nil {
-			C.free(unsafe.Pointer(cLastTimestamp))
-		}
-		if cUniqueID != nil {
-			C.free(unsafe.Pointer(cUniqueID))
-		}
-	}()
-
-	if cEAPTypeName != nil {
-		s.EAPTypeName = C.GoString(cEAPTypeName)
-	}
-	if cAuthMAC != nil && cAuthMACLen == 6 {
-		macBytes := unsafe.Slice((*byte)(unsafe.Pointer(cAuthMAC)), 6)
-		s.AuthenticatorMACAddress = macAddrString(macBytes)
+	if cAuthMAC != nil && cAuthMACLen > 0 {
+		r.authMAC = C.GoBytes(unsafe.Pointer(cAuthMAC), C.int(cAuthMACLen))
 	}
 	if cCertChainData != nil && cCertChainLen > 0 {
-		s.TLSServerCertificateChain, s.TLSServerCertificateSHA1, s.TLSServerCertificateSerials = parseTLSCertChain(
-			unsafe.Slice((*byte)(unsafe.Pointer(cCertChainData)), int(cCertChainLen)))
+		r.certChain = C.GoBytes(unsafe.Pointer(cCertChainData), C.int(cCertChainLen))
 	}
-	s.TLSTrustClientStatus = int(cTLSTrustStatus)
-	s.TLSNegotiatedCipher = int(cTLSCipher)
-	if cTLSProtoVersion != nil {
-		s.TLSNegotiatedProtocolVersion = C.GoString(cTLSProtoVersion)
-	}
-	s.InnerEAPType = int(cInnerEAPType)
-	if cInnerEAPTypeName != nil {
-		s.InnerEAPTypeName = C.GoString(cInnerEAPTypeName)
-	}
-	if cLastTimestamp != nil {
-		s.LastStatusTimestamp = C.GoString(cLastTimestamp)
-	}
-	if cUniqueID != nil {
-		s.UniqueIdentifier = C.GoString(cUniqueID)
+	if ret == -1 {
+		r.loadError = C.GoString(C.dot1x_load_error())
 	}
 
-	if ret != 0 {
-		if ret == -1 {
-			reason := "unknown error"
-			if cerr := C.dot1x_load_error(); cerr != nil {
-				reason = C.GoString(cerr)
-			}
-			return s, fmt.Errorf("%w: could not load EAPOLControlCopyStateAndStatus for %s: %s", ErrBackendUnavailable, ifname, reason)
-		}
-		if ret == -2 {
-			return s, fmt.Errorf("EAPOLControlCopyStateAndStatus returned no status for %s", ifname)
-		}
-		return s, fmt.Errorf("EAPOLControlCopyStateAndStatus returned %d for %s", int(ret), ifname)
+	for _, p := range []unsafe.Pointer{
+		unsafe.Pointer(cEAPTypeName), unsafe.Pointer(cAuthMAC), unsafe.Pointer(cCertChainData),
+		unsafe.Pointer(cTLSProtoVersion), unsafe.Pointer(cInnerEAPTypeName),
+		unsafe.Pointer(cLastTimestamp), unsafe.Pointer(cUniqueID),
+	} {
+		C.free(p) // free(NULL) is a no-op
 	}
 
-	return s, nil
+	return statusFromEAPOL(ifname, r)
 }
 
 // defaultInterfaces returns the real en* interfaces on this host, falling back
