@@ -51,32 +51,22 @@ func (s stubLister) interfaceNames() []string { return s.names }
 func TestDot1XStatusColumns(t *testing.T) {
 	t.Parallel()
 	want := []string{
-		"interface", "interface_type", "ssid", "profile_name", "mdm_payload_uuid", "state", "state_name",
-		"supplicant_state", "supplicant_state_name",
-		"eap_type", "eap_type_name",
-		"client_status", "client_status_name",
-		"failure_reason", "failure_code", "failure_eap_code",
-		"domain_specific_error",
-		"authenticator_mac_address",
-		"mode", "mode_name",
-		"tls_session_was_resumed",
-		"tls_server_certificate_chain",
-		"tls_server_certificate_sha1",
-		"tls_server_certificate_serials",
+		// Interface & network
+		"interface", "interface_type", "ssid", "mac_address", "authenticator_mac_address",
+		// Status
+		"state", "state_name", "supplicant_state", "supplicant_state_name",
+		"client_status", "client_status_name", "authenticated_since", "last_status_timestamp",
+		// Failure detail
+		"failure_reason", "failure_code", "failure_eap_code", "domain_specific_error",
+		// Authentication
+		"eap_type", "eap_type_name", "inner_eap_type", "inner_eap_type_name", "identity", "mode", "mode_name",
+		// Configuration / profile
+		"profile_name", "mdm_payload_uuid", "mdm_payload_type", "mdm_profile_name", "mdm_profile_identifier",
+		"unique_identifier", "server_validation", "tls_trusted_root_ca_sha1", "tls_trusted_server_names",
+		// TLS session
+		"tls_negotiated_protocol_version", "tls_negotiated_cipher", "tls_session_was_resumed", "tls_trust_client_status",
+		"tls_server_certificate_chain", "tls_server_certificate_sha1", "tls_server_certificate_serials",
 		"tls_server_certificate_not_after",
-		"tls_trusted_root_ca_sha1",
-		"tls_trusted_server_names",
-		"server_validation",
-		"tls_trust_client_status",
-		"tls_negotiated_protocol_version",
-		"tls_negotiated_cipher",
-		"inner_eap_type",
-		"inner_eap_type_name",
-		"last_status_timestamp",
-		"authenticated_since",
-		"mac_address",
-		"identity",
-		"unique_identifier",
 	}
 	cols := Dot1XStatusColumns()
 	require.Len(t, cols, len(want))
@@ -876,4 +866,45 @@ func TestServerValidation(t *testing.T) {
 	assert.Equal(t, "name_only", serverValidation(false, true, true))
 	assert.Equal(t, "prompt", serverValidation(false, false, true))
 	assert.Equal(t, "none", serverValidation(true, true, false), "validation disabled overrides pinning")
+}
+
+// mdm_payload_uuid is matched against `profiles -C -o stdout-xml` to name the
+// payload type and the configuration profile that contains it.
+func TestMDMPayloadInfo(t *testing.T) {
+	t.Parallel()
+	b := []byte(readTestdata(t, "profiles-stdout.plist"))
+
+	for _, tc := range []struct {
+		name, uuid, typ, profile, id string
+	}{
+		{"wifi", "ABCDEF01-2345-6789-ABCD-EF0123456789", "com.apple.wifi.managed", "Corp Wi-Fi", "com.example.wifi.corp"},
+		{"case-insensitive", "abcdef01-2345-6789-abcd-ef0123456789", "com.apple.wifi.managed", "Corp Wi-Fi", "com.example.wifi.corp"},
+		{"ethernet", "30000000-0000-0000-0000-00000000000A", "com.apple.globalethernet.managed", "Wired 802.1X", "com.example.ethernet"},
+		{"per-user scope", "50000000-0000-0000-0000-000000000005", "com.apple.wifi.managed", "User Wi-Fi", "com.example.wifi.user"},
+		{"no match", "deadbeef-0000-0000-0000-000000000000", "", "", ""},
+		{"empty uuid", "", "", "", ""},
+	} {
+		typ, profile, id := mdmPayloadInfo(b, tc.uuid)
+		assert.Equal(t, []string{tc.typ, tc.profile, tc.id}, []string{typ, profile, id}, tc.name)
+	}
+
+	// PayloadContent (which can hold secrets) is never read or returned.
+	typ, profile, id := mdmPayloadInfo(b, "40000000-0000-0000-0000-000000000004")
+	assert.Equal(t, []string{"com.apple.ManagedClient.preferences", "App Settings", "com.example.app"}, []string{typ, profile, id})
+	assert.NotContains(t, typ+profile+id, "FAKE-SECRET")
+
+	for _, bad := range [][]byte{nil, []byte("not a plist"), []byte(`<plist version="1.0"><array/></plist>`)} {
+		typ, profile, id := mdmPayloadInfo(bad, "ABCDEF01-2345-6789-ABCD-EF0123456789")
+		assert.Equal(t, []string{"", "", ""}, []string{typ, profile, id}, "bad input %q", bad)
+	}
+}
+
+func TestRowFromStatusMDMColumns(t *testing.T) {
+	t.Parallel()
+	row := rowFromStatus(Dot1XStatus{
+		MDMPayloadType: "com.apple.wifi.managed", MDMProfileName: "Corp Wi-Fi", MDMProfileIdentifier: "com.example.wifi.corp",
+	})
+	assert.Equal(t, "com.apple.wifi.managed", row["mdm_payload_type"])
+	assert.Equal(t, "Corp Wi-Fi", row["mdm_profile_name"])
+	assert.Equal(t, "com.example.wifi.corp", row["mdm_profile_identifier"])
 }

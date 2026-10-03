@@ -124,3 +124,33 @@ func eapolProfileInfo(plistData []byte, profileID string) eapolProfile {
 func profileSSID(plistData []byte, profileID string) string {
 	return eapolProfileInfo(plistData, profileID).ssid
 }
+
+// mdmPayloadInfo finds the payload whose PayloadUUID matches payloadUUID
+// (case-insensitive) in `profiles -C -o stdout-xml` output (scope, e.g.
+// "_computerlevel" or a user name -> profiles -> ProfileItems) and returns its
+// PayloadType plus the containing profile's display name and identifier.
+// Decoded loosely so unrelated keys don't break it; PayloadContent, which can
+// hold secrets, is never read. Empty strings when nothing matches.
+func mdmPayloadInfo(profilesXML []byte, payloadUUID string) (payloadType, profileName, profileIdentifier string) {
+	var scopes map[string]any
+	if payloadUUID == "" || plist.Unmarshal(profilesXML, &scopes) != nil {
+		return "", "", ""
+	}
+	for _, v := range scopes {
+		profiles, _ := v.([]any)
+		for _, p := range profiles {
+			profile, _ := p.(map[string]any)
+			items, _ := profile["ProfileItems"].([]any)
+			for _, it := range items {
+				item, _ := it.(map[string]any)
+				if uuid, _ := item["PayloadUUID"].(string); strings.EqualFold(uuid, payloadUUID) {
+					payloadType, _ = item["PayloadType"].(string)
+					profileName, _ = profile["ProfileDisplayName"].(string)
+					profileIdentifier, _ = profile["ProfileIdentifier"].(string)
+					return payloadType, profileName, profileIdentifier
+				}
+			}
+		}
+	}
+	return "", "", ""
+}

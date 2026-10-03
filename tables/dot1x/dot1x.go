@@ -25,6 +25,9 @@ type Dot1XStatus struct {
 	SSID                         string // Wi-Fi network name
 	ProfileName                  string // WLAN profile (Windows) / EAPOLClientProfile (macOS) name
 	MDMPayloadUUID               string // macOS: PayloadUUID of the Wi-Fi/Ethernet 802.1X payload behind the profile
+	MDMPayloadType               string // macOS: PayloadType of that payload (e.g. com.apple.wifi.managed)
+	MDMProfileName               string // macOS: ProfileDisplayName of the configuration profile containing it
+	MDMProfileIdentifier         string // macOS: ProfileIdentifier of that configuration profile
 	State                        int    // EAPOLControlState: 0=Idle,1=Starting,2=Running,3=Stopping
 	SupplicantState              int    // 802.1X supplicant state machine value
 	EAPType                      int    // EAP method code (e.g. 13=TLS)
@@ -158,44 +161,53 @@ const modeMachineOrUser = 4
 // Dot1XStatusColumns returns the column definitions.
 func Dot1XStatusColumns() []table.ColumnDefinition {
 	return []table.ColumnDefinition{
+		// Interface & network
 		table.TextColumn("interface"),
 		table.TextColumn("interface_type"),
 		table.TextColumn("ssid"),
-		table.TextColumn("profile_name"),
-		table.TextColumn("mdm_payload_uuid"),
+		table.TextColumn("mac_address"),
+		table.TextColumn("authenticator_mac_address"),
+		// Status
 		table.IntegerColumn("state"),
 		table.TextColumn("state_name"),
 		table.IntegerColumn("supplicant_state"),
 		table.TextColumn("supplicant_state_name"),
-		table.IntegerColumn("eap_type"),
-		table.TextColumn("eap_type_name"),
 		table.IntegerColumn("client_status"),
 		table.TextColumn("client_status_name"),
+		table.TextColumn("authenticated_since"),
+		table.TextColumn("last_status_timestamp"),
+		// Failure detail
 		table.TextColumn("failure_reason"),
 		table.TextColumn("failure_code"),
 		table.TextColumn("failure_eap_code"),
 		table.IntegerColumn("domain_specific_error"),
-		table.TextColumn("authenticator_mac_address"),
+		// Authentication
+		table.IntegerColumn("eap_type"),
+		table.TextColumn("eap_type_name"),
+		table.IntegerColumn("inner_eap_type"),
+		table.TextColumn("inner_eap_type_name"),
+		table.TextColumn("identity"),
 		table.IntegerColumn("mode"),
 		table.TextColumn("mode_name"),
+		// Configuration / profile
+		table.TextColumn("profile_name"),
+		table.TextColumn("mdm_payload_uuid"),
+		table.TextColumn("mdm_payload_type"),
+		table.TextColumn("mdm_profile_name"),
+		table.TextColumn("mdm_profile_identifier"),
+		table.TextColumn("unique_identifier"),
+		table.TextColumn("server_validation"),
+		table.TextColumn("tls_trusted_root_ca_sha1"),
+		table.TextColumn("tls_trusted_server_names"),
+		// TLS session
+		table.TextColumn("tls_negotiated_protocol_version"),
+		table.IntegerColumn("tls_negotiated_cipher"),
 		table.IntegerColumn("tls_session_was_resumed"),
+		table.IntegerColumn("tls_trust_client_status"),
 		table.TextColumn("tls_server_certificate_chain"),
 		table.TextColumn("tls_server_certificate_sha1"),
 		table.TextColumn("tls_server_certificate_serials"),
 		table.TextColumn("tls_server_certificate_not_after"),
-		table.TextColumn("tls_trusted_root_ca_sha1"),
-		table.TextColumn("tls_trusted_server_names"),
-		table.TextColumn("server_validation"),
-		table.IntegerColumn("tls_trust_client_status"),
-		table.TextColumn("tls_negotiated_protocol_version"),
-		table.IntegerColumn("tls_negotiated_cipher"),
-		table.IntegerColumn("inner_eap_type"),
-		table.TextColumn("inner_eap_type_name"),
-		table.TextColumn("last_status_timestamp"),
-		table.TextColumn("authenticated_since"),
-		table.TextColumn("mac_address"),
-		table.TextColumn("identity"),
-		table.TextColumn("unique_identifier"),
 	}
 }
 
@@ -295,6 +307,9 @@ func rowFromStatus(s Dot1XStatus) map[string]string {
 		"ssid":                             s.SSID,
 		"profile_name":                     s.ProfileName,
 		"mdm_payload_uuid":                 s.MDMPayloadUUID,
+		"mdm_payload_type":                 s.MDMPayloadType,
+		"mdm_profile_name":                 s.MDMProfileName,
+		"mdm_profile_identifier":           s.MDMProfileIdentifier,
 		"state":                            itoa(s.State),
 		"state_name":                       lookupName(stateNames, s.State),
 		"supplicant_state":                 itoa(s.SupplicantState),

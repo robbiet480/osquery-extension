@@ -12,38 +12,68 @@ WHERE supplicant_state_name != 'Authenticated';
 
 ## Columns
 
+### Interface & network
+
 | Column | Type | Description | macOS | Windows |
 |---|---|---|---|---|
 | `interface` | TEXT | Interface name: BSD name on macOS (`en0`), adapter description on Windows | ✓ | ✓ |
 | `interface_type` | TEXT | `wifi` or `ethernet` | ✓ | ✓ |
 | `ssid` | TEXT | Wi-Fi network name (see [SSID on macOS](#ssid-on-macos)) | ✓ Wi-Fi | ✓ Wi-Fi |
-| `profile_name` | TEXT | Name of the configuration behind the connection. macOS: the EAPOLClientProfile name, i.e. the 802.1X payload's `PayloadDisplayName`, or `WiFi (<SSID>)` when the payload has none (not the configuration profile's own name; use `mdm_payload_uuid` for that). Windows: the WLAN profile name (MDM-pushed or hand-joined, usually the SSID) | ✓ profile-based | ✓ Wi-Fi |
-| `mdm_payload_uuid` | TEXT | `PayloadUUID` of the configuration-profile 802.1X payload (Wi-Fi or Ethernet) that installed the profile (see [Which MDM profile?](#which-mdm-profile-is-controlling-the-connection)) | ✓ | — |
+| `mac_address` | TEXT | Client MAC address on this link (RADIUS `Calling-Station-Id`), including private/randomized Wi-Fi addresses. macOS: the interface's current address. Windows: from the newest 802.1X event, so also set on failure rows | ✓ | ✓ |
+| `authenticator_mac_address` | TEXT | Authenticator MAC: the AP's BSSID for Wi-Fi, the switch port's MAC for wired | ✓ | ✓ |
+
+### Status
+
+| Column | Type | Description | macOS | Windows |
+|---|---|---|---|---|
 | `state` / `state_name` | INTEGER / TEXT | EAPOL control state ([values](#state)) | ✓ | ✓ |
 | `supplicant_state` / `supplicant_state_name` | INTEGER / TEXT | 802.1X supplicant state machine ([values](#supplicant_state)) | ✓ | ✓ |
-| `eap_type` / `eap_type_name` | INTEGER / TEXT | Outer EAP method ([values](#eap_type--inner_eap_type)) | ✓ | ✓ |
-| `inner_eap_type` / `inner_eap_type_name` | INTEGER / TEXT | Inner EAP method for tunneled auth ([values](#eap_type--inner_eap_type)). Empty when the inner method isn't EAP (e.g. TTLS-PAP) | ✓ | ✓ |
 | `client_status` / `client_status_name` | INTEGER / TEXT | EAP client status ([values](#client_status)). Windows reports `OK`, or `Failed` for failure rows | ✓ | ✓ |
+| `authenticated_since` | TEXT | ISO 8601 time the current session became `Authenticated`; empty otherwise. macOS: eap8021x's session `Timestamp`. Windows: the newest 802.1X success event (12012 / 15505) | ✓ | ✓ |
+| `last_status_timestamp` | TEXT | ISO 8601 time of the last status change (Windows: time of the last 802.1X event) | ✓ | ✓ |
+
+### Failure detail
+
+| Column | Type | Description | macOS | Windows |
+|---|---|---|---|---|
 | `failure_reason` / `failure_code` | TEXT | Last 802.1X failure from the Windows event log (`ReasonText` / `ReasonCode`, e.g. `Explicit Eap failure received` / `0x50005`). When the event names an EAP root cause (`EAPRootCauseString`), it is appended: `<ReasonText>; <root cause>` | — | ✓ |
 | `failure_eap_code` | TEXT | The EAP method's own error for that failure (`EAPReasonCode`, e.g. `0x80420015`); empty when absent or `0x0` | — | ✓ |
 | `domain_specific_error` | INTEGER | EAP client domain-specific error; an Apple OSStatus, may be negative (e.g. `-9807`) | ✓ | — |
-| `authenticator_mac_address` | TEXT | Authenticator MAC: the AP's BSSID for Wi-Fi, the switch port's MAC for wired | ✓ | ✓ |
+
+### Authentication
+
+| Column | Type | Description | macOS | Windows |
+|---|---|---|---|---|
+| `eap_type` / `eap_type_name` | INTEGER / TEXT | Outer EAP method ([values](#eap_type--inner_eap_type)) | ✓ | ✓ |
+| `inner_eap_type` / `inner_eap_type_name` | INTEGER / TEXT | Inner EAP method for tunneled auth ([values](#eap_type--inner_eap_type)). Empty when the inner method isn't EAP (e.g. TTLS-PAP) | ✓ | ✓ |
+| `identity` | TEXT | Outer EAP identity sent to the RADIUS server (`User-Name`), e.g. `anonymous@campus.edu` or `host/PC01`. macOS: profile-based sessions only (the profile's `OuterIdentity`, else `UserName`); empty for hand-joined networks and certificate-only EAP-TLS. Windows: from the newest 802.1X event | ✓ profile-based | ✓ |
 | `mode` / `mode_name` | INTEGER / TEXT | Whose credentials authenticate the session ([values](#mode)) | ✓ | ✓ |
+
+### Configuration / profile
+
+| Column | Type | Description | macOS | Windows |
+|---|---|---|---|---|
+| `profile_name` | TEXT | Name of the configuration behind the connection. macOS: the EAPOLClientProfile name, i.e. the 802.1X payload's `PayloadDisplayName`, or `WiFi (<SSID>)` when the payload has none (not the configuration profile's own name; see `mdm_profile_name`). Windows: the WLAN profile name (MDM-pushed or hand-joined, usually the SSID) | ✓ profile-based | ✓ Wi-Fi |
+| `mdm_payload_uuid` | TEXT | `PayloadUUID` of the configuration-profile 802.1X payload (Wi-Fi or Ethernet) that installed the profile (see [Which MDM profile?](#which-mdm-profile-is-controlling-the-connection)) | ✓ | — |
+| `mdm_payload_type` | TEXT | `PayloadType` of that payload: `com.apple.wifi.managed` for Wi-Fi, or an Ethernet scope such as `com.apple.globalethernet.managed`, `com.apple.firstethernet.managed` or `com.apple.firstactiveethernet.managed`. Needs no special privileges; from `profiles -C` | ✓ | — |
+| `mdm_profile_name` | TEXT | Display name (`ProfileDisplayName`) of the configuration profile containing that payload. Needs no special privileges; from `profiles -C` | ✓ | — |
+| `mdm_profile_identifier` | TEXT | Identifier (`ProfileIdentifier`) of that configuration profile. Needs no special privileges; from `profiles -C` | ✓ | — |
+| `unique_identifier` | TEXT | macOS: eap8021x's EAPOLClientProfile ID (profile-based sessions only; a local ID, **not** an MDM UUID). Windows: interface GUID | ✓ | ✓ |
+| `server_validation` | TEXT | How the profile has the client validate the RADIUS server: `pinned`, `ca_only`, `name_only`, `prompt` or `none` (see [Auditing server validation](#auditing-server-validation)); empty for macOS sessions without a profile | ✓ profile-based | ✓ |
+| `tls_trusted_root_ca_sha1` | TEXT | SHA-1 thumbprints of the trusted root CA(s) pinned in the profile | — | ✓ |
+| `tls_trusted_server_names` | TEXT | Comma-separated server names the RADIUS certificate must match. macOS: the profile's `TLSTrustedServerNames`. Windows: the outer method's `ServerNames` | ✓ profile-based | ✓ |
+
+### TLS session
+
+| Column | Type | Description | macOS | Windows |
+|---|---|---|---|---|
+| `tls_negotiated_protocol_version` | TEXT | `1.2` / `1.3` (EAP-TLS only, see [TLS details on macOS](#tls-details-on-macos)) | ✓ | — |
+| `tls_negotiated_cipher` | INTEGER | TLS cipher suite code (PEAP / TTLS / EAP-FAST only) | ✓ | — |
 | `tls_session_was_resumed` | INTEGER | 1/0; empty when unknown (always on Windows) | ✓ | — |
+| `tls_trust_client_status` | INTEGER | Trust evaluation status while a trust decision is pending | ✓ | — |
 | `tls_server_certificate_chain` | TEXT | Pipe-separated subject DNs (RFC 4514) of the server certificate chain | ✓ | — |
 | `tls_server_certificate_sha1` / `tls_server_certificate_serials` | TEXT | Comma-separated SHA-1 fingerprints / hex serials of that chain | ✓ | — |
 | `tls_server_certificate_not_after` | TEXT | ISO 8601 (UTC) expiry of the leaf (first) server certificate; empty without a chain | ✓ | — |
-| `tls_trusted_root_ca_sha1` | TEXT | SHA-1 thumbprints of the trusted root CA(s) pinned in the profile | — | ✓ |
-| `tls_trusted_server_names` | TEXT | Comma-separated server names the RADIUS certificate must match. macOS: the profile's `TLSTrustedServerNames`. Windows: the outer method's `ServerNames` | ✓ profile-based | ✓ |
-| `server_validation` | TEXT | How the profile has the client validate the RADIUS server: `pinned`, `ca_only`, `name_only`, `prompt` or `none` (see [Auditing server validation](#auditing-server-validation)); empty for macOS sessions without a profile | ✓ profile-based | ✓ |
-| `tls_trust_client_status` | INTEGER | Trust evaluation status while a trust decision is pending | ✓ | — |
-| `tls_negotiated_protocol_version` | TEXT | `1.2` / `1.3` (EAP-TLS only, see [TLS details on macOS](#tls-details-on-macos)) | ✓ | — |
-| `tls_negotiated_cipher` | INTEGER | TLS cipher suite code (PEAP / TTLS / EAP-FAST only) | ✓ | — |
-| `last_status_timestamp` | TEXT | ISO 8601 time of the last status change (Windows: time of the last 802.1X event) | ✓ | ✓ |
-| `authenticated_since` | TEXT | ISO 8601 time the current session became `Authenticated`; empty otherwise. macOS: eap8021x's session `Timestamp`. Windows: the newest 802.1X success event (12012 / 15505) | ✓ | ✓ |
-| `mac_address` | TEXT | Client MAC address on this link (RADIUS `Calling-Station-Id`), including private/randomized Wi-Fi addresses. macOS: the interface's current address. Windows: from the newest 802.1X event, so also set on failure rows | ✓ | ✓ |
-| `identity` | TEXT | Outer EAP identity sent to the RADIUS server (`User-Name`), e.g. `anonymous@campus.edu` or `host/PC01`. macOS: profile-based sessions only (the profile's `OuterIdentity`, else `UserName`); empty for hand-joined networks and certificate-only EAP-TLS. Windows: from the newest 802.1X event | ✓ profile-based | ✓ |
-| `unique_identifier` | TEXT | macOS: eap8021x's EAPOLClientProfile ID (profile-based sessions only; a local ID, **not** an MDM UUID). Windows: interface GUID | ✓ | ✓ |
 
 Query a single interface with `WHERE interface = 'en0'` (macOS) or `WHERE interface = '<adapter description>'` (Windows). Otherwise every 802.1X-capable interface is checked: all `en*` interfaces on macOS, and Wi-Fi adapters plus wired adapters with a Wired AutoConfig profile on Windows.
 
@@ -96,11 +126,18 @@ The EAPOL status has no SSID, and every public macOS source (CoreWLAN, `networks
 
 #### Which MDM profile is controlling the connection?
 
-`unique_identifier` is eap8021x's own profile ID, generated locally. The link to MDM is `mdm_payload_uuid`, the `PayloadUUID` of the payload that installed the 802.1X profile: `com.apple.wifi.managed` for Wi-Fi, or an Ethernet payload such as `com.apple.globalethernet.managed` / `com.apple.firstactiveethernet.managed` for wired. It works for both and is empty for networks configured by hand. Look it up in your MDM, or on the Mac:
+`unique_identifier` is eap8021x's own profile ID, generated locally. The link to MDM is `mdm_payload_uuid`, the `PayloadUUID` of the payload that installed the 802.1X profile; it is empty for networks configured by hand. When it is set, the table looks that payload up in `profiles -C` (no special privileges needed) and fills:
 
-```sh
-sudo profiles show -type configuration | grep -B20 '<mdm_payload_uuid>'
+- `mdm_payload_type`: which payload it is, and so which interfaces it scopes: `com.apple.wifi.managed` for Wi-Fi, or for wired `com.apple.globalethernet.managed` (any Ethernet interface), `com.apple.firstethernet.managed` (the first Ethernet interface) or `com.apple.firstactiveethernet.managed` (the first active one).
+- `mdm_profile_name` / `mdm_profile_identifier`: the configuration profile it came from, as shown in System Settings and your MDM.
+
+```sql
+SELECT interface, ssid, mdm_payload_type, mdm_profile_name, mdm_profile_identifier
+FROM dot1x
+WHERE mdm_payload_uuid != '';
 ```
+
+If `mdm_payload_uuid` is set but the other three are empty, the payload wasn't found in `profiles -C` output, or the command failed or timed out (10 s); search for the UUID in your MDM.
 
 #### TLS details on macOS
 

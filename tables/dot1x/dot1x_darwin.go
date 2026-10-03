@@ -365,22 +365,47 @@ static char* sc_interface_type(const char* bsd) {
 */
 import "C"
 import (
+	"context"
 	"net"
 	"os"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"sync"
+	"time"
 	"unsafe"
 )
 
-// productionBackend calls EAPOLControlCopyStateAndStatus via cgo.
-type productionBackend struct{}
+// productionBackend calls EAPOLControlCopyStateAndStatus via cgo. One is
+// created per table generation, so profilesXML caches `profiles -C` output
+// for that generation only.
+type productionBackend struct {
+	profilesOnce sync.Once
+	profilesXML  []byte
+}
 
 var loadOnce sync.Once
 
 func newBackend() Dot1XBackend {
 	loadOnce.Do(func() { C.load_dot1x() })
-	return productionBackend{}
+	return &productionBackend{}
+}
+
+// profilesTimeout bounds the `profiles` call.
+const profilesTimeout = 10 * time.Second
+
+// installedProfiles returns `/usr/bin/profiles -C -o stdout-xml` output (works
+// as any user), run at most once per backend and only when a row needs it;
+// nil on error.
+func (b *productionBackend) installedProfiles() []byte {
+	b.profilesOnce.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), profilesTimeout)
+		defer cancel()
+		if out, err := exec.CommandContext(ctx, "/usr/bin/profiles", "-C", "-o", "stdout-xml").Output(); err == nil {
+			b.profilesXML = out
+		}
+	})
+	return b.profilesXML
 }
 
 // knownNetworksPlist is where macOS records joined Wi-Fi networks. It is
@@ -397,8 +422,9 @@ const eapolClientConfigPlist = "/Library/Preferences/SystemConfiguration/com.app
 // EAPOL status doesn't carry: exactly from the session's EAPOLClientProfile
 // when it is profile-based (UniqueIdentifier is the profile ID), with the
 // SSID otherwise matched from the BSSID against known networks (root + Full
-// Disk Access).
-func applyDarwinProfile(s *Dot1XStatus) {
+// Disk Access). When the profile came from MDM, the mdm_payload_type /
+// mdm_profile_* columns come from installedProfiles.
+func applyDarwinProfile(s *Dot1XStatus, installedProfiles func() []byte) {
 	if s.UniqueIdentifier != "" {
 		if b, err := os.ReadFile(eapolClientConfigPlist); err == nil {
 			p := eapolProfileInfo(b, s.UniqueIdentifier)
@@ -409,6 +435,9 @@ func applyDarwinProfile(s *Dot1XStatus) {
 			}
 		}
 	}
+	if s.MDMPayloadUUID != "" {
+		s.MDMPayloadType, s.MDMProfileName, s.MDMProfileIdentifier = mdmPayloadInfo(installedProfiles(), s.MDMPayloadUUID)
+	}
 	if s.SSID == "" && s.InterfaceType == "wifi" && s.AuthenticatorMACAddress != "" {
 		if b, err := os.ReadFile(knownNetworksPlist); err == nil {
 			s.SSID = knownNetworkSSID(b, s.AuthenticatorMACAddress)
@@ -416,7 +445,7 @@ func applyDarwinProfile(s *Dot1XStatus) {
 	}
 }
 
-func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
+func (b *productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 	cName := C.CString(ifname)
 	defer C.free(unsafe.Pointer(cName))
 
@@ -516,7 +545,7 @@ func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 
 	s, err := statusFromEAPOL(ifname, r)
 	if err == nil {
-		applyDarwinProfile(&s)
+		applyDarwinProfile(&s, b.installedProfiles)
 		// The interface's current (possibly private/randomized) address.
 		if i, ierr := net.InterfaceByName(ifname); ierr == nil && len(i.HardwareAddr) == 6 {
 			s.MACAddress = macAddrString(i.HardwareAddr)
