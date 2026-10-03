@@ -64,7 +64,7 @@ func padMAC(s string) string {
 type eapolProfile struct {
 	ssid        string // WLAN binding
 	name        string // UserDefinedName
-	payloadUUID string // com.apple.wifi.managed PayloadUUID, if installed by a configuration profile
+	payloadUUID string // PayloadUUID of the Wi-Fi/Ethernet 802.1X payload that installed it, if any
 }
 
 // eapolProfileInfo looks up profileID in eap8021x's client configuration
