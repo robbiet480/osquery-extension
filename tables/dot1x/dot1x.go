@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 
@@ -137,8 +138,14 @@ func Dot1XStatusColumns() []table.ColumnDefinition {
 }
 
 // Dot1XStatusGenerate generates table rows by querying each interface.
+// A backend holding per-generation resources (the Windows WLAN client handle)
+// implements io.Closer and is closed once the generation finishes.
 func Dot1XStatusGenerate(ctx context.Context, queryContext table.QueryContext) ([]map[string]string, error) {
-	return generateRows(ctx, newBackend(), queryContext)
+	backend := newBackend()
+	if c, ok := backend.(io.Closer); ok {
+		defer c.Close() //nolint:errcheck // nothing useful to do on close failure
+	}
+	return generateRows(ctx, backend, queryContext)
 }
 
 // generateRows queries the backend for the requested interfaces. If the

@@ -3,7 +3,6 @@
 package dot1x
 
 import (
-	"errors"
 	"fmt"
 	"sync"
 	"syscall"
@@ -12,34 +11,14 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// This file holds only the wlanapi.dll syscall plumbing. The status logic it
+// feeds lives in dot1x_wlan.go (wlanStatus), which is tested on every platform.
+
 const (
 	wlanClientVersion = 2
 
 	wlanIntfOpcodeCurrentConnection uint32 = 7
-
-	wlanIfaceStateNotReady       uint32 = 0
-	wlanIfaceStateConnected      uint32 = 1
-	wlanIfaceStateAdHocFormed    uint32 = 2
-	wlanIfaceStateDisconnecting  uint32 = 3
-	wlanIfaceStateDisconnected   uint32 = 4
-	wlanIfaceStateAssociating    uint32 = 5
-	wlanIfaceStateDiscovering    uint32 = 6
-	wlanIfaceStateAuthenticating uint32 = 7
 )
-
-type windowsGUID struct {
-	Data1 uint32
-	Data2 uint16
-	Data3 uint16
-	Data4 [8]byte
-}
-
-func (g windowsGUID) String() string {
-	return fmt.Sprintf("{%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X}",
-		g.Data1, g.Data2, g.Data3,
-		g.Data4[0], g.Data4[1],
-		g.Data4[2], g.Data4[3], g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7])
-}
 
 type wlanInterfaceInfo struct {
 	InterfaceGuid           windowsGUID
@@ -52,38 +31,6 @@ type wlanInterfaceInfoList struct {
 	Index         uint32
 }
 
-type dot11SSID struct {
-	SSIDLength uint32
-	SSID       [32]byte
-}
-
-type wlanAssociationAttributes struct {
-	Dot11Ssid         dot11SSID
-	Dot11BssType      uint32
-	Dot11Bssid        [6]byte
-	_                 [2]byte // align to 4-byte boundary
-	Dot11PhyType      uint32
-	Dot11PhyIndex     uint32
-	WlanSignalQuality uint32
-	RxRate            uint32
-	TxRate            uint32
-}
-
-type wlanSecurityAttributes struct {
-	SecurityEnabled int32
-	OneXEnabled     int32
-	AuthAlgorithm   uint32
-	CipherAlgorithm uint32
-}
-
-type wlanConnectionAttributes struct {
-	IsState               uint32
-	ConnectionMode        uint32
-	ProfileName           [256]uint16
-	AssociationAttributes wlanAssociationAttributes
-	SecurityAttributes    wlanSecurityAttributes
-}
-
 var (
 	// NewLazySystemDLL (not NewLazyDLL) forces loading from the Windows system
 	// directory, avoiding DLL search-order hijacking if the process runs from a
@@ -91,6 +38,7 @@ var (
 	modWlanapi = windows.NewLazySystemDLL("wlanapi.dll")
 
 	procWlanOpenHandle     = modWlanapi.NewProc("WlanOpenHandle")
+	procWlanCloseHandle    = modWlanapi.NewProc("WlanCloseHandle")
 	procWlanEnumInterfaces = modWlanapi.NewProc("WlanEnumInterfaces")
 	procWlanQueryInterface = modWlanapi.NewProc("WlanQueryInterface")
 	procWlanGetProfile     = modWlanapi.NewProc("WlanGetProfile")
@@ -99,16 +47,14 @@ var (
 
 var (
 	wlanOnce sync.Once
-	// wlanAvail reports whether wlanapi.dll loaded and a client handle opened.
+	// wlanAvail reports whether wlanapi.dll loaded and every proc resolved.
+	// Only DLL/proc resolution is cached for the process lifetime; the client
+	// handle is opened per table generation (see windowsBackend) so the
+	// extension recovers if wlansvc was down or restarts.
 	wlanAvail bool
-	// wlanInitErr records why initWlan failed (DLL load, missing proc, or
-	// WlanOpenHandle), so unavailableBackend can report a specific reason.
+	// wlanInitErr records why initWlan failed (DLL load or missing proc), so
+	// unavailableBackend can report a specific reason.
 	wlanInitErr error
-	// wlanHandle is a process-lifetime WLAN client handle opened once in
-	// initWlan and reused by every query. Like the darwin framework handle, it
-	// is intentionally never closed — the OS reclaims it at process exit, and
-	// reusing one handle avoids an open/close round-trip on every GetStatus.
-	wlanHandle uintptr
 )
 
 func initWlan() {
@@ -117,7 +63,7 @@ func initWlan() {
 		return
 	}
 	for _, p := range []*windows.LazyProc{
-		procWlanOpenHandle, procWlanEnumInterfaces,
+		procWlanOpenHandle, procWlanCloseHandle, procWlanEnumInterfaces,
 		procWlanQueryInterface, procWlanGetProfile, procWlanFreeMemory,
 	} {
 		if err := p.Find(); err != nil {
@@ -125,26 +71,14 @@ func initWlan() {
 			return
 		}
 	}
-	h, err := openWlanHandle()
-	if err != nil {
-		wlanInitErr = fmt.Errorf("opening WLAN client handle: %w", err)
-		return
-	}
-	wlanHandle = h
 	wlanAvail = true
 }
 
-// ifaceInfo is the per-interface data captured from a single
-// WlanEnumInterfaces call: its GUID (stable) and current state.
-type ifaceInfo struct {
-	guid  windowsGUID
-	state uint32
-}
-
-// windowsBackend reuses the process-lifetime WLAN handle and, on first use,
-// snapshots all interfaces (both the description->info map and the ordered
-// names) so one table generation enumerates only once — shared between the
-// default interface list and every GetStatus.
+// windowsBackend implements wlanClient for one table generation. On first use
+// it opens a WLAN client handle and snapshots all interfaces (both the
+// description->info map and the ordered names) so the generation enumerates
+// only once — shared between the default interface list and every GetStatus.
+// Close releases the handle.
 type windowsBackend struct {
 	handle  uintptr
 	once    sync.Once
@@ -158,7 +92,7 @@ func newBackend() Dot1XBackend {
 	if !wlanAvail {
 		return unavailableBackend{}
 	}
-	return &windowsBackend{handle: wlanHandle}
+	return &windowsBackend{}
 }
 
 type unavailableBackend struct{}
@@ -237,15 +171,12 @@ func uniqueIfaceKey(seen map[string]ifaceInfo, desc string, guid windowsGUID) st
 
 // enumerateWlanInterfaces returns the descriptions of all wireless interfaces.
 func enumerateWlanInterfaces() []string {
-	wlanOnce.Do(initWlan)
-	if !wlanAvail {
+	b, ok := newBackend().(*windowsBackend)
+	if !ok {
 		return nil
 	}
-	_, names, err := enumerateWlanInterfaceInfos(wlanHandle)
-	if err != nil {
-		return nil
-	}
-	return names
+	defer b.Close() //nolint:errcheck
+	return b.interfaceNames()
 }
 
 func defaultInterfaces() []string {
@@ -256,11 +187,20 @@ func defaultInterfaces() []string {
 	return enumerateWlanInterfaces()
 }
 
-// snapshot lazily enumerates interfaces once per backend instance (i.e. once
-// per table generation) and caches both the info map and ordered names.
-func (b *windowsBackend) snapshot() (map[string]ifaceInfo, []string, error) {
+// interfaces lazily opens the client handle and enumerates interfaces once
+// per backend instance (i.e. once per table generation), caching both the
+// info map and ordered names. A WlanOpenHandle failure is reported like an
+// enumeration failure (backend unavailable for this generation); the next
+// generation retries with a fresh backend.
+func (b *windowsBackend) interfaces() (map[string]ifaceInfo, []string, error) {
 	b.once.Do(func() {
-		b.ifaces, b.names, b.enumErr = enumerateWlanInterfaceInfos(b.handle)
+		h, err := openWlanHandle()
+		if err != nil {
+			b.enumErr = fmt.Errorf("opening WLAN client handle: %w", err)
+			return
+		}
+		b.handle = h
+		b.ifaces, b.names, b.enumErr = enumerateWlanInterfaceInfos(h)
 	})
 	return b.ifaces, b.names, b.enumErr
 }
@@ -271,7 +211,7 @@ func (b *windowsBackend) snapshot() (map[string]ifaceInfo, []string, error) {
 // nil when WLAN is unavailable / enumeration failed (caller's generic
 // fallback), or a possibly-empty slice of adapter names otherwise.
 func (b *windowsBackend) interfaceNames() []string {
-	_, names, err := b.snapshot()
+	_, names, err := b.interfaces()
 	if err != nil {
 		return nil
 	}
@@ -279,39 +219,25 @@ func (b *windowsBackend) interfaceNames() []string {
 }
 
 func (b *windowsBackend) GetStatus(ifname string) (Dot1XStatus, error) {
-	infos, _, err := b.snapshot()
-	if err != nil {
-		// Enumeration failing is systemic (affects every interface), so report
-		// it as backend-unavailable rather than a per-interface miss. Both are
-		// wrapped (%w) so errors.Is(ErrBackendUnavailable) holds and the
-		// underlying WlanEnumInterfaces error stays introspectable.
-		return Dot1XStatus{Interface: ifname}, fmt.Errorf("%w: %w", ErrBackendUnavailable, err)
-	}
-	info, ok := infos[ifname]
-	if !ok {
-		return Dot1XStatus{Interface: ifname}, fmt.Errorf("wireless interface %q not found", ifname)
-	}
-	guid := info.guid
-	ifState := info.state
+	return wlanStatus(b, ifname)
+}
 
-	s := Dot1XStatus{
-		Interface:        ifname,
-		UniqueIdentifier: guid.String(),
+// Close releases the WLAN client handle, if one was opened.
+func (b *windowsBackend) Close() error {
+	if b.handle == 0 {
+		return nil
 	}
-
-	s.State, s.SupplicantState = mapWlanState(ifState)
-	s.ClientStatus = -1
-	s.Mode = -1
-	s.TLSTrustClientStatus = -1
-	s.TLSNegotiatedCipher = -1
-	s.InnerEAPType = -1
-	s.EAPType = -1
-	s.TLSSessionWasResumed = -1
-
-	if err := checkActiveConnection(ifState); err != nil {
-		return s, err
+	ret, _, _ := procWlanCloseHandle.Call(b.handle, 0)
+	b.handle = 0
+	if ret != 0 {
+		return fmt.Errorf("WlanCloseHandle failed: %w", syscall.Errno(ret))
 	}
+	return nil
+}
 
+// currentConnection queries WLAN_CONNECTION_ATTRIBUTES for guid and returns a
+// copy of the raw buffer (the wlanapi allocation is freed before returning).
+func (b *windowsBackend) currentConnection(guid windowsGUID) ([]byte, error) {
 	var dataSize uint32
 	var dataPtr unsafe.Pointer
 	var opcodeValueType uint32
@@ -325,90 +251,17 @@ func (b *windowsBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 		uintptr(unsafe.Pointer(&opcodeValueType)),
 	)
 	if ret != 0 {
-		// The interface reports connected/authenticating, so a failed
-		// current-connection query would leave a misleading "successful" row
-		// missing MAC/EAP/profile data. Return a per-interface error so
-		// generateRows skips it rather than emitting a partial row.
-		return s, fmt.Errorf("WlanQueryInterface(current_connection) failed for %q: %w", ifname, syscall.Errno(ret))
+		return nil, syscall.Errno(ret)
 	}
 	if dataPtr == nil {
-		return s, fmt.Errorf("WlanQueryInterface(current_connection) returned no data for %q", ifname)
+		return nil, nil
 	}
 	defer freeWlanMemory(uintptr(dataPtr))
-
-	// Guard against a short buffer (version differences / unexpected value
-	// type / corrupt response) before dereferencing, to avoid an OOB read.
-	if want := unsafe.Sizeof(wlanConnectionAttributes{}); uintptr(dataSize) < want {
-		return s, fmt.Errorf("WlanQueryInterface(current_connection) returned %d bytes for %q, want >= %d", dataSize, ifname, want)
-	}
-
-	conn := (*wlanConnectionAttributes)(dataPtr)
-
-	s.AuthenticatorMACAddress = macAddrString(conn.AssociationAttributes.Dot11Bssid[:])
-
-	if err := applyOneXSecurity(&s, ifState, conn.SecurityAttributes.OneXEnabled != 0); err != nil {
-		return s, err
-	}
-
-	profileName := utf16ToString(conn.ProfileName[:])
-	if profileName != "" {
-		if xmlStr, err := getWlanProfileXML(b.handle, &guid, profileName); err == nil {
-			profile := parseWLANProfile(xmlStr) // single pass over the XML
-			if profile.eapType > 0 {
-				s.EAPType = profile.eapType
-			}
-			if profile.authMode >= 0 {
-				s.Mode = profile.authMode
-			}
-			if profile.innerEAPType > 0 {
-				s.InnerEAPType = profile.innerEAPType
-			}
-			// These are the configured trusted root CA thumbprints (server
-			// validation), not the presented server certificate's fingerprint,
-			// so they go in TLSTrustedRootCASHA1 rather than
-			// TLSServerCertificateSHA1 (which macOS fills with the actual chain).
-			if profile.trustedRootCASHA1 != "" {
-				s.TLSTrustedRootCASHA1 = profile.trustedRootCASHA1
-			}
-		}
-	}
-
-	return s, nil
+	return append([]byte(nil), unsafe.Slice((*byte)(dataPtr), dataSize)...), nil
 }
 
-// errNoActiveConnection is returned by GetStatus for an adapter that is not
-// connected or authenticating; like macOS, idle adapters produce no row.
-var errNoActiveConnection = errors.New("no active WLAN connection")
-
-// checkActiveConnection returns errNoActiveConnection unless ifState is
-// connected or authenticating.
-func checkActiveConnection(ifState uint32) error {
-	if ifState != wlanIfaceStateConnected && ifState != wlanIfaceStateAuthenticating {
-		return errNoActiveConnection
-	}
-	return nil
-}
-
-// errNotDot1X is returned by GetStatus for a WLAN connection that is not
-// using 802.1X (open/PSK/SAE), so generateRows skips the interface like macOS.
-var errNotDot1X = errors.New("802.1X not enabled on current WLAN connection")
-
-// applyOneXSecurity applies the connection's 802.1X security state to s. It
-// returns errNotDot1X when 802.1X is not enabled; when connected it marks the
-// supplicant Authenticated with ClientStatus success.
-func applyOneXSecurity(s *Dot1XStatus, ifState uint32, oneXEnabled bool) error {
-	if !oneXEnabled {
-		return errNotDot1X
-	}
-	if ifState == wlanIfaceStateConnected {
-		s.SupplicantState = 4 // Authenticated
-		s.ClientStatus = 0
-	}
-	return nil
-}
-
-// getWlanProfileXML calls WlanGetProfile and returns the profile XML string.
-func getWlanProfileXML(handle uintptr, guid *windowsGUID, profileName string) (string, error) {
+// profileXML calls WlanGetProfile and returns the profile XML string.
+func (b *windowsBackend) profileXML(guid windowsGUID, profileName string) (string, error) {
 	namePtr, err := syscall.UTF16PtrFromString(profileName)
 	if err != nil {
 		return "", err
@@ -416,8 +269,8 @@ func getWlanProfileXML(handle uintptr, guid *windowsGUID, profileName string) (s
 	var xmlPtr *uint16
 	var flags uint32
 	ret, _, _ := procWlanGetProfile.Call(
-		handle,
-		uintptr(unsafe.Pointer(guid)),
+		b.handle,
+		uintptr(unsafe.Pointer(&guid)),
 		uintptr(unsafe.Pointer(namePtr)),
 		0,
 		uintptr(unsafe.Pointer(&xmlPtr)),
@@ -439,35 +292,4 @@ func utf16PtrToString(p *uint16) string {
 		return ""
 	}
 	return windows.UTF16PtrToString(p)
-}
-
-// mapWlanState maps WLAN_INTERFACE_STATE to (EAPOLControlState, SupplicantState).
-func mapWlanState(state uint32) (int, int) {
-	switch state {
-	case wlanIfaceStateConnected:
-		return 2, 4 // Running, Authenticated
-	case wlanIfaceStateAuthenticating:
-		return 2, 3 // Running, Authenticating
-	case wlanIfaceStateAssociating:
-		return 1, 1 // Starting, Connecting
-	case wlanIfaceStateDiscovering:
-		return 1, 2 // Starting, Acquired
-	case wlanIfaceStateDisconnecting:
-		return 3, 6 // Stopping, Logoff
-	case wlanIfaceStateDisconnected:
-		return 0, 0 // Idle, Disconnected
-	case wlanIfaceStateNotReady:
-		return 0, 7 // Idle, Inactive
-	default:
-		return 0, 0
-	}
-}
-
-func utf16ToString(s []uint16) string {
-	for i, v := range s {
-		if v == 0 {
-			return syscall.UTF16ToString(s[:i])
-		}
-	}
-	return syscall.UTF16ToString(s)
 }
