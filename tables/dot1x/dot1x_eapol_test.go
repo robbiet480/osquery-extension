@@ -255,3 +255,10 @@ func TestStatusFromEAPOLOtherError(t *testing.T) {
 	require.EqualError(t, err, "EAPOLControlCopyStateAndStatus returned 5 for bogus0")
 	assert.NotErrorIs(t, err, ErrBackendUnavailable)
 }
+
+func TestStatusFromEAPOLInterfaceType(t *testing.T) {
+	t.Parallel()
+	s, err := statusFromEAPOL("en8", eapolRaw{interfaceType: "ethernet", state: 2, supplicantState: 4})
+	require.NoError(t, err)
+	assert.Equal(t, "ethernet", s.InterfaceType)
+}

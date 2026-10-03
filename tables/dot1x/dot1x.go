@@ -21,6 +21,7 @@ import (
 // or the Wired AutoConfig event log and LAN profile (Ethernet).
 type Dot1XStatus struct {
 	Interface                    string
+	InterfaceType                string // "wifi", "ethernet", or "" if unknown
 	SSID                         string // Windows Wi-Fi only; on macOS join wifi_status
 	State                        int    // EAPOLControlState: 0=Idle,1=Starting,2=Running,3=Stopping
 	SupplicantState              int    // 802.1X supplicant state machine value
@@ -149,6 +150,7 @@ const modeMachineOrUser = 4
 func Dot1XStatusColumns() []table.ColumnDefinition {
 	return []table.ColumnDefinition{
 		table.TextColumn("interface"),
+		table.TextColumn("interface_type"),
 		table.TextColumn("ssid"),
 		table.IntegerColumn("state"),
 		table.TextColumn("state_name"),
@@ -271,6 +273,7 @@ func interfacesToQuery(backend Dot1XBackend, queryContext table.QueryContext) []
 func rowFromStatus(s Dot1XStatus) map[string]string {
 	row := map[string]string{
 		"interface":                       s.Interface,
+		"interface_type":                  s.InterfaceType,
 		"ssid":                            s.SSID,
 		"state":                           itoa(s.State),
 		"state_name":                      lookupName(stateNames, s.State),
@@ -531,4 +534,16 @@ func macAddrString(b []byte) string {
 		buf = append(buf, hexChar(v>>4), hexChar(v&0x0f))
 	}
 	return string(buf)
+}
+
+// mapSCInterfaceType maps a SystemConfiguration interface type
+// (kSCNetworkInterfaceType*) to the interface_type column value.
+func mapSCInterfaceType(t string) string {
+	switch t {
+	case "IEEE80211":
+		return "wifi"
+	case "Ethernet":
+		return "ethernet"
+	}
+	return ""
 }

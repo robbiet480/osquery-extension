@@ -51,7 +51,7 @@ func (s stubLister) interfaceNames() []string { return s.names }
 func TestDot1XStatusColumns(t *testing.T) {
 	t.Parallel()
 	want := []string{
-		"interface", "ssid", "state", "state_name",
+		"interface", "interface_type", "ssid", "state", "state_name",
 		"supplicant_state", "supplicant_state_name",
 		"eap_type", "eap_type_name",
 		"client_status", "client_status_name",
@@ -760,4 +760,22 @@ func TestRowFromStatusSSID(t *testing.T) {
 	t.Parallel()
 	assert.Equal(t, "Campus", rowFromStatus(Dot1XStatus{SSID: "Campus"})["ssid"])
 	assert.Equal(t, "", rowFromStatus(Dot1XStatus{})["ssid"])
+}
+
+func TestRowFromStatusInterfaceType(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "wifi", rowFromStatus(Dot1XStatus{InterfaceType: "wifi"})["interface_type"])
+	assert.Equal(t, "", rowFromStatus(Dot1XStatus{})["interface_type"])
+}
+
+func TestMapSCInterfaceType(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		"IEEE80211": "wifi",
+		"Ethernet":  "ethernet",
+		"Bond":      "",
+		"":          "",
+	} {
+		assert.Equal(t, want, mapSCInterfaceType(in), in)
+	}
 }

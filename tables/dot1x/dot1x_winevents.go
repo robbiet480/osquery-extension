@@ -193,6 +193,7 @@ func wiredStatus(w wiredIface, events []winEvent) (Dot1XStatus, error) {
 	guid := strings.ToUpper(w.guid)
 	s := Dot1XStatus{
 		Interface:            w.description,
+		InterfaceType:        "ethernet",
 		UniqueIdentifier:     guid,
 		State:                2, // Running
 		SupplicantState:      -1,

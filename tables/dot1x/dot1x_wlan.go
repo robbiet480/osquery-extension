@@ -134,6 +134,7 @@ func wlanStatus(c wlanClient, ifname string) (Dot1XStatus, error) {
 
 	s := Dot1XStatus{
 		Interface:            ifname,
+		InterfaceType:        "wifi",
 		UniqueIdentifier:     info.guid.String(),
 		ClientStatus:         -1,
 		Mode:                 -1,

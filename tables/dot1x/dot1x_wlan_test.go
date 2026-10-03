@@ -142,6 +142,7 @@ func TestWlanStatusConnectedEAPTLS(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, Dot1XStatus{
 		Interface:               testIface,
+		InterfaceType:           "wifi",
 		State:                   2, // Running
 		SupplicantState:         4, // Authenticated
 		EAPType:                 13,
@@ -471,4 +472,12 @@ func TestDecodeSSIDClampsLength(t *testing.T) {
 	assert.Equal(t, "abc"+string(make([]byte, 29)), ssidString(d))
 	d.SSIDLength = 3
 	assert.Equal(t, "abc", ssidString(d))
+}
+
+func TestWlanStatusInterfaceTypeWifi(t *testing.T) {
+	t.Parallel()
+	c := newFake(t, wlanIfaceStateConnected, connAttrs(wlanIfaceStateConnected, true, "Campus"), sampleProfileXML)
+	s, err := wlanStatus(c, testIface)
+	require.NoError(t, err)
+	assert.Equal(t, "wifi", s.InterfaceType)
 }

@@ -16,6 +16,7 @@ type eapolRaw struct {
 	// loadError is the dlopen/dlsym failure reason (only meaningful when ret == -1).
 	loadError string
 
+	interfaceType                string // "wifi"/"ethernet" from SystemConfiguration
 	state                        int
 	supplicantState              int
 	eapType                      int
@@ -43,6 +44,7 @@ func statusFromEAPOL(ifname string, r eapolRaw) (Dot1XStatus, error) {
 		Interface:                    ifname,
 		State:                        r.state,
 		SupplicantState:              r.supplicantState,
+		InterfaceType:                r.interfaceType,
 		EAPType:                      r.eapType,
 		EAPTypeName:                  r.eapTypeName,
 		ClientStatus:                 r.clientStatus,

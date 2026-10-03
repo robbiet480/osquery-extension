@@ -55,6 +55,7 @@ func testWired(t *testing.T) wiredIface {
 func wiredBase() Dot1XStatus {
 	return Dot1XStatus{
 		Interface:            testWiredIface,
+		InterfaceType:        "ethernet",
 		State:                2,
 		SupplicantState:      -1,
 		EAPType:              13,
@@ -336,6 +337,7 @@ func TestWlanStatusIdleFailureRow(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, Dot1XStatus{
 		Interface:               testIface,
+		InterfaceType:           "wifi",
 		SSID:                    "dot1x-test",
 		State:                   0, // Idle
 		SupplicantState:         5, // Held
@@ -591,4 +593,17 @@ func TestWlanIdleFailureOnlyWhenDisconnected(t *testing.T) {
 		_, err := wlanStatus(c, testIface)
 		assert.ErrorIs(t, err, errNoActiveConnection, "state %d", st)
 	}
+}
+
+func TestInterfaceTypeWiredAndWifiFailure(t *testing.T) {
+	t.Parallel()
+	s, err := wiredStatus(testWired(t), []winEvent{loadEvent(t, "wired-15505")})
+	require.NoError(t, err)
+	assert.Equal(t, "ethernet", s.InterfaceType)
+
+	c := newFake(t, wlanIfaceStateDisconnected, connAttrs(wlanIfaceStateDisconnected, true, "Campus"), sampleProfileXML)
+	c.events = []winEvent{loadEvent(t, "wlan-12013")}
+	f, err := wlanStatus(c, testIface)
+	require.NoError(t, err)
+	assert.Equal(t, "wifi", f.InterfaceType)
 }

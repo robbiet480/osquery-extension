@@ -3,8 +3,9 @@
 package dot1x
 
 /*
-#cgo LDFLAGS: -framework CoreFoundation
+#cgo LDFLAGS: -framework CoreFoundation -framework SystemConfiguration
 #include <CoreFoundation/CoreFoundation.h>
+#include <SystemConfiguration/SystemConfiguration.h>
 #include <dlfcn.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -330,6 +331,26 @@ int dot1x_query(
 	CFRelease(status);
 	return 0;
 }
+
+// sc_interface_type returns the SystemConfiguration type of the BSD
+// interface (e.g. "IEEE80211", "Ethernet") as a malloc'd string, or NULL.
+static char* sc_interface_type(const char* bsd) {
+	CFArrayRef all = SCNetworkInterfaceCopyAll();
+	if (!all) return NULL;
+	CFStringRef want = CFStringCreateWithCString(NULL, bsd, kCFStringEncodingUTF8);
+	char* out = NULL;
+	for (CFIndex i = 0; want && i < CFArrayGetCount(all); i++) {
+		SCNetworkInterfaceRef ni = (SCNetworkInterfaceRef)CFArrayGetValueAtIndex(all, i);
+		CFStringRef name = SCNetworkInterfaceGetBSDName(ni);
+		if (name && CFEqual(name, want)) {
+			out = cfstring_go(SCNetworkInterfaceGetInterfaceType(ni));
+			break;
+		}
+	}
+	if (want) CFRelease(want);
+	CFRelease(all);
+	return out;
+}
 */
 import "C"
 import (
@@ -401,8 +422,15 @@ func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 		&cUniqueID,
 	)
 
+	var ifType string
+	if cType := C.sc_interface_type(cName); cType != nil {
+		ifType = mapSCInterfaceType(C.GoString(cType))
+		C.free(unsafe.Pointer(cType))
+	}
+
 	r := eapolRaw{
 		ret:                          int(ret),
+		interfaceType:                ifType,
 		state:                        int(cState),
 		supplicantState:              int(cSupplicantState),
 		eapType:                      int(cEAPType),
