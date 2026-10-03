@@ -85,6 +85,7 @@ func TestStatusFromEAPOLSystemEAPTLS(t *testing.T) {
 		tlsNegotiatedProtocolVersion: "1.2",
 		innerEAPType:                 -1,
 		lastStatusTimestamp:          "2026-06-06T12:00:00Z",
+		authenticatedSince:           "2026-06-06T11:59:58Z",
 		uniqueIdentifier:             "11111111-2222-3333-4444-555555555555",
 	}
 
@@ -110,6 +111,7 @@ func TestStatusFromEAPOLSystemEAPTLS(t *testing.T) {
 		TLSNegotiatedProtocolVersion: "1.2",
 		InnerEAPType:                 -1,
 		LastStatusTimestamp:          "2026-06-06T12:00:00Z",
+		AuthenticatedSince:           "2026-06-06T11:59:58Z",
 		UniqueIdentifier:             "11111111-2222-3333-4444-555555555555",
 	}, s)
 }
@@ -261,4 +263,22 @@ func TestStatusFromEAPOLInterfaceType(t *testing.T) {
 	s, err := statusFromEAPOL("en8", eapolRaw{interfaceType: "ethernet", state: 2, supplicantState: 4})
 	require.NoError(t, err)
 	assert.Equal(t, "ethernet", s.InterfaceType)
+}
+
+// eap8021x's "Timestamp" (kEAPOLControlTimestamp) is when the session first
+// became Authenticated; it only applies to an Authenticated row.
+func TestStatusFromEAPOLAuthenticatedSince(t *testing.T) {
+	t.Parallel()
+	r := sentinelRaw()
+	r.state, r.supplicantState = 2, 4
+	r.authenticatedSince = "2026-06-06T11:59:58Z"
+
+	s, err := statusFromEAPOL("en0", r)
+	require.NoError(t, err)
+	assert.Equal(t, "2026-06-06T11:59:58Z", s.AuthenticatedSince)
+
+	r.supplicantState = 3 // Authenticating
+	s, err = statusFromEAPOL("en0", r)
+	require.NoError(t, err)
+	assert.Empty(t, s.AuthenticatedSince)
 }

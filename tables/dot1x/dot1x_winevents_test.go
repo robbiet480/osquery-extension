@@ -187,6 +187,9 @@ func TestWiredStatusSuccessRealSequence(t *testing.T) {
 	want.ClientStatus = 0
 	want.AuthenticatorMACAddress = "8c:30:66:a0:fd:33"
 	want.LastStatusTimestamp = "2026-10-03T07:40:43Z"
+	want.AuthenticatedSince = "2026-10-03T07:40:43Z"
+	want.MACAddress = "9c:bf:0d:00:93:95"
+	want.Identity = "host/host/DESKTOP-TEST01"
 	assert.Equal(t, want, s)
 }
 
@@ -201,6 +204,7 @@ func TestWiredStatusFailure(t *testing.T) {
 	want.FailureReason = "Unable to identify a user for 802.1X authentication"
 	want.FailureCode = "0x50001"
 	want.LastStatusTimestamp = "2026-10-03T07:40:42Z"
+	want.MACAddress = "9c:bf:0d:00:93:95" // Identity "-" is empty
 	assert.Equal(t, want, s, "SwitchMAC 000000000000 is unknown, not a MAC")
 }
 
@@ -226,6 +230,7 @@ func TestWiredStatusSuspended(t *testing.T) {
 	want.FailureReason = "Unable to identify a user for 802.1X authentication"
 	want.FailureCode = "0x50001"
 	want.LastStatusTimestamp = "2026-10-03T07:40:42Z"
+	want.MACAddress = "9c:bf:0d:00:93:95"
 	assert.Equal(t, want, s)
 }
 
@@ -267,7 +272,17 @@ func TestWiredStatusAuthenticating(t *testing.T) {
 		assert.Equal(t, -1, s.ClientStatus)
 		assert.Empty(t, s.FailureReason)
 		assert.Equal(t, "2026-10-03T08:00:05Z", s.LastStatusTimestamp)
+		assert.Empty(t, s.AuthenticatedSince, "not authenticated")
 	}
+
+	// The start event's client MAC/identity, when it carries them.
+	e := at(wiredEvent(15503), 5)
+	e.Data["LocalMAC"], e.Data["Identity"] = "9CBF0D009395", "host/DESKTOP-TEST01"
+	s, err := wiredStatus(testWired(t), []winEvent{e, at(loadEvent(t, "wired-15505"), 1)})
+	require.NoError(t, err)
+	assert.Equal(t, "9c:bf:0d:00:93:95", s.MACAddress)
+	assert.Equal(t, "host/DESKTOP-TEST01", s.Identity)
+	assert.Empty(t, s.AuthenticatedSince)
 }
 
 func TestWiredStatusUnplugged(t *testing.T) {
@@ -344,6 +359,8 @@ func TestWlanStatusIdleFailureRow(t *testing.T) {
 		EAPType:                 -1,
 		ClientStatus:            1, // Failed
 		AuthenticatorMACAddress: "2a:0b:8b:00:f2:34",
+		MACAddress:              "2c:9c:58:29:12:75",
+		Identity:                "anonymous",
 		Mode:                    -1,
 		TLSSessionWasResumed:    -1,
 		TLSTrustClientStatus:    -1,
@@ -427,7 +444,28 @@ func TestWlanStatusConnectedTimestamp(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 4, s.SupplicantState)
 	assert.Equal(t, "2026-10-03T06:52:12Z", s.LastStatusTimestamp)
+	assert.Equal(t, "2026-10-03T06:52:12Z", s.AuthenticatedSince)
+	assert.Equal(t, "2c:9c:58:29:12:75", s.MACAddress)
+	assert.Equal(t, "dot1x-test", s.Identity)
 	assert.Empty(t, s.FailureReason)
+}
+
+// Mid-authentication the start event (12011) gives the client MAC; there is
+// no success yet, so no authenticated_since.
+func TestWlanStatusAuthenticatingClientMAC(t *testing.T) {
+	t.Parallel()
+	c := newFake(t, wlanIfaceStateAuthenticating, connAttrs(wlanIfaceStateAuthenticating, true, "Campus"), sampleProfileXML)
+	start := loadEvent(t, "wlan-12011")
+	start.Time = loadEvent(t, "wlan-12012").Time.Add(time.Hour)
+	c.events = []winEvent{start, loadEvent(t, "wlan-12012")}
+
+	s, err := wlanStatus(c, testIface)
+	require.NoError(t, err)
+	assert.Equal(t, 3, s.SupplicantState)
+	assert.Equal(t, "2c:9c:58:29:12:75", s.MACAddress)
+	assert.Empty(t, s.Identity, "12011 carries no Identity")
+	assert.Empty(t, s.AuthenticatedSince)
+	assert.Empty(t, s.LastStatusTimestamp)
 }
 
 func TestWlanStatusConnectedEventsError(t *testing.T) {
@@ -439,6 +477,8 @@ func TestWlanStatusConnectedEventsError(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 4, s.SupplicantState)
 	assert.Empty(t, s.LastStatusTimestamp)
+	assert.Empty(t, s.AuthenticatedSince)
+	assert.Empty(t, s.MACAddress)
 }
 
 // --- routing (WLAN + wired) ---

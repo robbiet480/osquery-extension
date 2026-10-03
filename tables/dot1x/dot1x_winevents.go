@@ -125,6 +125,20 @@ func eventMAC(s string) string {
 	return macAddrString(b)
 }
 
+// applyClient copies the client side of an 802.1X event into s: the local
+// MAC (WLAN "LocalMac", wired "LocalMAC") and the outer EAP identity, which
+// Wired AutoConfig logs as "-" when there is none.
+func applyClient(s *Dot1XStatus, e winEvent) {
+	mac := e.Data["LocalMac"]
+	if mac == "" {
+		mac = e.Data["LocalMAC"]
+	}
+	s.MACAddress = eventMAC(mac)
+	if s.Identity = e.Data["Identity"]; s.Identity == "-" {
+		s.Identity = ""
+	}
+}
+
 // applyFailure copies an 802.1X failure event (15514 / 12013) into s and
 // marks it Failed (EAPClientStatus 1) so client_status_name matches macOS.
 func applyFailure(s *Dot1XStatus, e winEvent) {
@@ -138,6 +152,7 @@ func applyFailure(s *Dot1XStatus, e winEvent) {
 	}
 	s.AuthenticatorMACAddress = eventMAC(mac)
 	s.LastStatusTimestamp = eventTimestamp(e)
+	applyClient(s, e)
 }
 
 // wlanIdleStatus is consulted for a WLAN adapter with no active connection
@@ -160,12 +175,24 @@ func wlanIdleStatus(c wlanClient, s Dot1XStatus, ifState uint32) (Dot1XStatus, e
 	return s, nil
 }
 
-// wlanAuthTimestamp returns the time of guid's newest 802.1X success, or "".
-func wlanAuthTimestamp(c wlanClient, guid string) string {
-	if e, _, ok := newestFor(bestEffort(c.wlanEvents()), guid, evWlanAuthSucceeded); ok {
-		return eventTimestamp(e)
+// applyWlanEvents fills s from guid's newest 802.1X event matching the
+// connection state: when connected, the success (12012) gives the
+// timestamps, client MAC and identity; while authenticating, the start
+// (12011) gives the client MAC.
+func applyWlanEvents(c wlanClient, s *Dot1XStatus, ifState uint32) {
+	id := evWlanAuthStarted
+	if ifState == wlanIfaceStateConnected {
+		id = evWlanAuthSucceeded
 	}
-	return ""
+	e, _, ok := newestFor(bestEffort(c.wlanEvents()), s.UniqueIdentifier, id)
+	if !ok {
+		return
+	}
+	applyClient(s, e)
+	if id == evWlanAuthSucceeded {
+		s.LastStatusTimestamp = eventTimestamp(e)
+		s.AuthenticatedSince = s.LastStatusTimestamp
+	}
 }
 
 // wiredIface is a wired adapter that has a dot3svc LAN profile.
@@ -228,9 +255,12 @@ func wiredStatus(w wiredIface, events []winEvent) (Dot1XStatus, error) {
 			return s, errNoActiveConnection
 		case evWiredAuthStarted, evWiredAuthRestart:
 			s.SupplicantState = 3 // Authenticating
+			applyClient(&s, e)
 		case evWiredAuthSuccess:
 			s.SupplicantState, s.ClientStatus = 4, 0 // Authenticated
 			s.AuthenticatorMACAddress = eventMAC(e.Data["SwitchMAC"])
+			s.AuthenticatedSince = eventTimestamp(e)
+			applyClient(&s, e)
 		case evWiredAuthFailed:
 			s.SupplicantState = 5 // Held
 			applyFailure(&s, e)

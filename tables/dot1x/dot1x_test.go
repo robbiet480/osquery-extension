@@ -70,6 +70,9 @@ func TestDot1XStatusColumns(t *testing.T) {
 		"inner_eap_type",
 		"inner_eap_type_name",
 		"last_status_timestamp",
+		"authenticated_since",
+		"mac_address",
+		"identity",
 		"unique_identifier",
 	}
 	cols := Dot1XStatusColumns()
@@ -180,6 +183,9 @@ func TestRowFromStatus(t *testing.T) {
 		InnerEAPType:                 26,
 		InnerEAPTypeName:             "MSCHAPv2",
 		LastStatusTimestamp:          "2026-06-05T12:00:00Z",
+		AuthenticatedSince:           "2026-06-05T11:00:00Z",
+		MACAddress:                   "2c:9c:58:29:12:75",
+		Identity:                     "anonymous@campus.edu",
 		UniqueIdentifier:             "abc-123",
 		FailureReason:                "Explicit Eap failure received",
 		FailureCode:                  "0x50005",
@@ -210,6 +216,9 @@ func TestRowFromStatus(t *testing.T) {
 	assert.Equal(t, "26", row["inner_eap_type"])
 	assert.Equal(t, "MSCHAPv2", row["inner_eap_type_name"])
 	assert.Equal(t, "2026-06-05T12:00:00Z", row["last_status_timestamp"])
+	assert.Equal(t, "2026-06-05T11:00:00Z", row["authenticated_since"])
+	assert.Equal(t, "2c:9c:58:29:12:75", row["mac_address"])
+	assert.Equal(t, "anonymous@campus.edu", row["identity"])
 	assert.Equal(t, "abc-123", row["unique_identifier"])
 }
 
@@ -818,10 +827,16 @@ func TestEAPOLProfileInfo(t *testing.T) {
 	b := []byte(readTestdata(t, "eapolclient-configuration.plist"))
 
 	got := eapolProfileInfo(b, "11111111-2222-3333-4444-555555555555")
-	assert.Equal(t, eapolProfile{ssid: "CorpWiFi", name: "WiFi (CorpWiFi)", payloadUUID: "ABCDEF01-2345-6789-ABCD-EF0123456789"}, got)
+	assert.Equal(t, eapolProfile{
+		ssid: "CorpWiFi", name: "WiFi (CorpWiFi)", payloadUUID: "ABCDEF01-2345-6789-ABCD-EF0123456789",
+		identity: "anonymous@campus.edu",
+	}, got, "OuterIdentity wins over UserName")
 
 	got = eapolProfileInfo(b, "66666666-7777-8888-9999-000000000000")
-	assert.Equal(t, eapolProfile{name: "Wired (no WLAN)"}, got, "no WLAN binding, not from MDM")
+	assert.Equal(t, eapolProfile{name: "Wired (no WLAN)", identity: "host/wired01.campus.edu"}, got, "no WLAN binding, not from MDM; UserName only")
+
+	got = eapolProfileInfo(b, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+	assert.Equal(t, eapolProfile{name: "EAP-TLS (certificate only)"}, got, "no UserName/OuterIdentity")
 
 	assert.Equal(t, eapolProfile{}, eapolProfileInfo(b, "unknown"))
 	assert.Equal(t, eapolProfile{}, eapolProfileInfo(nil, "11111111-2222-3333-4444-555555555555"))

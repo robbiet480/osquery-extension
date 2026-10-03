@@ -343,3 +343,19 @@ func TestParseWLANProfileEncodingDeclaration(t *testing.T) {
 	assert.True(t, info.useOneX)
 	assert.Equal(t, 13, info.eapType)
 }
+
+// useOneX / OneXEnabled are xs:boolean, so "1" is as valid as "true".
+func TestParseWLANProfileOneXXSBoolean(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]bool{
+		"<useOneX>true</useOneX>":         true,
+		"<useOneX>1</useOneX>":            true,
+		"<useOneX> 1 </useOneX>":          true,
+		"<useOneX>false</useOneX>":        false,
+		"<useOneX>0</useOneX>":            false,
+		"<OneXEnabled>1</OneXEnabled>":    true,
+		"<OneXEnabled>TRUE</OneXEnabled>": false, // xs:boolean is case-sensitive
+	} {
+		assert.Equal(t, want, parseWLANProfile("<WLANProfile>"+in+"</WLANProfile>").useOneX, in)
+	}
+}

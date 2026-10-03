@@ -65,6 +65,7 @@ type eapolProfile struct {
 	ssid        string // WLAN binding
 	name        string // UserDefinedName
 	payloadUUID string // PayloadUUID of the Wi-Fi/Ethernet 802.1X payload that installed it, if any
+	identity    string // outer EAP identity: AuthenticationProperties OuterIdentity, else UserName
 }
 
 // eapolProfileInfo looks up profileID in eap8021x's client configuration
@@ -94,6 +95,12 @@ func eapolProfileInfo(plistData []byte, profileID string) eapolProfile {
 	info, _ := profile["Information"].(map[string]any)
 	mcx, _ := info["com.apple.mcx.configurationprofiles.8021X"].(map[string]any)
 	out.payloadUUID, _ = mcx["PayloadUUID"].(string)
+	// Only the identity keys are read; AuthenticationProperties can also hold
+	// UserPassword and other secrets.
+	auth, _ := profile["AuthenticationProperties"].(map[string]any)
+	if out.identity, _ = auth["OuterIdentity"].(string); out.identity == "" {
+		out.identity, _ = auth["UserName"].(string)
+	}
 	return out
 }
 

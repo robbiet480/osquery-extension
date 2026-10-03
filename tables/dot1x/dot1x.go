@@ -46,6 +46,9 @@ type Dot1XStatus struct {
 	InnerEAPType                 int    // inner EAP method for tunneled auth (PEAP/TTLS)
 	InnerEAPTypeName             string // human-readable inner EAP method
 	LastStatusTimestamp          string // ISO 8601
+	AuthenticatedSince           string // ISO 8601 time the session became Authenticated; "" unless Authenticated
+	MACAddress                   string // client MAC on this link (RADIUS Calling-Station-Id), colon-separated
+	Identity                     string // outer EAP identity (RADIUS User-Name)
 	UniqueIdentifier             string
 }
 
@@ -181,6 +184,9 @@ func Dot1XStatusColumns() []table.ColumnDefinition {
 		table.IntegerColumn("inner_eap_type"),
 		table.TextColumn("inner_eap_type_name"),
 		table.TextColumn("last_status_timestamp"),
+		table.TextColumn("authenticated_since"),
+		table.TextColumn("mac_address"),
+		table.TextColumn("identity"),
 		table.TextColumn("unique_identifier"),
 	}
 }
@@ -306,6 +312,9 @@ func rowFromStatus(s Dot1XStatus) map[string]string {
 		"inner_eap_type":                  itoa(s.InnerEAPType),
 		"inner_eap_type_name":             "",
 		"last_status_timestamp":           s.LastStatusTimestamp,
+		"authenticated_since":             s.AuthenticatedSince,
+		"mac_address":                     s.MACAddress,
+		"identity":                        s.Identity,
 		"unique_identifier":               s.UniqueIdentifier,
 	}
 	if s.EAPTypeName != "" {

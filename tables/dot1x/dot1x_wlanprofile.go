@@ -80,7 +80,9 @@ func parseWLANProfile(xmlStr string) wlanProfileInfo {
 			sawOneX = true
 		case "useOneX", "OneXEnabled": // WLAN, LAN (dot3svc) profile
 			if v, ok := readCharData(dec); ok {
-				info.useOneX = strings.TrimSpace(v) == "true"
+				// xs:boolean: "true" or "1".
+				b := strings.TrimSpace(v)
+				info.useOneX = b == "true" || b == "1"
 			}
 		case "authMode":
 			if !gotAuthMode {

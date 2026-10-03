@@ -214,6 +214,7 @@ int dot1x_query(
 	int* out_inner_eap_type,
 	char** out_inner_eap_type_name,
 	char** out_last_status_timestamp,
+	char** out_authenticated_since,
 	char** out_unique_identifier
 ) {
 	// Initialize all outputs before any early return path.
@@ -236,6 +237,7 @@ int dot1x_query(
 	*out_inner_eap_type = -1;
 	*out_inner_eap_type_name = NULL;
 	*out_last_status_timestamp = NULL;
+	*out_authenticated_since = NULL;
 	*out_unique_identifier = NULL;
 
 	if (!copy_state_fn) return -1;
@@ -266,6 +268,7 @@ int dot1x_query(
 	CFStringRef kMode                   = CFSTR("Mode");
 	CFStringRef kUniqueIdentifier       = CFSTR("UniqueIdentifier");
 	CFStringRef kLastStatusTimestamp    = CFSTR("LastStatusTimestamp");
+	CFStringRef kTimestamp              = CFSTR("Timestamp");
 	CFStringRef kAdditionalProperties   = CFSTR("AdditionalProperties");
 	CFStringRef kTLSSessionWasResumed   = CFSTR("TLSSessionWasResumed");
 	CFStringRef kTLSServerCertChain     = CFSTR("TLSServerCertificateChain");
@@ -298,6 +301,14 @@ int dot1x_query(
 		CFTypeRef tsVal = NULL;
 		CFDictionaryGetValueIfPresent(status, kLastStatusTimestamp, &tsVal);
 		*out_last_status_timestamp = cfdate_iso8601(tsVal);
+	}
+
+	// Timestamp (kEAPOLControlTimestamp): when the session first became
+	// Authenticated; Supplicant.c only includes it while authenticated.
+	{
+		CFTypeRef tsVal = NULL;
+		CFDictionaryGetValueIfPresent(status, kTimestamp, &tsVal);
+		*out_authenticated_since = cfdate_iso8601(tsVal);
 	}
 
 	// TLSSessionWasResumed, TLSServerCertificateChain,
@@ -381,7 +392,7 @@ const knownNetworksPlist = "/Library/Preferences/com.apple.wifi.known-networks.p
 // (world-readable).
 const eapolClientConfigPlist = "/Library/Preferences/SystemConfiguration/com.apple.network.eapolclient.configuration.plist"
 
-// applyDarwinProfile fills ssid, profile_name and mdm_payload_uuid, which the
+// applyDarwinProfile fills ssid, profile_name, mdm_payload_uuid and identity, which the
 // EAPOL status doesn't carry: exactly from the session's EAPOLClientProfile
 // when it is profile-based (UniqueIdentifier is the profile ID), with the
 // SSID otherwise matched from the BSSID against known networks (root + Full
@@ -390,7 +401,7 @@ func applyDarwinProfile(s *Dot1XStatus) {
 	if s.UniqueIdentifier != "" {
 		if b, err := os.ReadFile(eapolClientConfigPlist); err == nil {
 			p := eapolProfileInfo(b, s.UniqueIdentifier)
-			s.ProfileName, s.MDMPayloadUUID = p.name, p.payloadUUID
+			s.ProfileName, s.MDMPayloadUUID, s.Identity = p.name, p.payloadUUID, p.identity
 			if s.InterfaceType == "wifi" {
 				s.SSID = p.ssid
 			}
@@ -427,6 +438,7 @@ func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 		cInnerEAPType     C.int
 		cInnerEAPTypeName *C.char
 		cLastTimestamp    *C.char
+		cAuthSince        *C.char
 		cUniqueID         *C.char
 	)
 
@@ -451,6 +463,7 @@ func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 		&cInnerEAPType,
 		&cInnerEAPTypeName,
 		&cLastTimestamp,
+		&cAuthSince,
 		&cUniqueID,
 	)
 
@@ -478,6 +491,7 @@ func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 		innerEAPType:                 int(cInnerEAPType),
 		innerEAPTypeName:             C.GoString(cInnerEAPTypeName),
 		lastStatusTimestamp:          C.GoString(cLastTimestamp),
+		authenticatedSince:           C.GoString(cAuthSince),
 		uniqueIdentifier:             C.GoString(cUniqueID),
 	}
 	if cAuthMAC != nil && cAuthMACLen > 0 {
@@ -493,7 +507,7 @@ func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 	for _, p := range []unsafe.Pointer{
 		unsafe.Pointer(cEAPTypeName), unsafe.Pointer(cAuthMAC), unsafe.Pointer(cCertChainData),
 		unsafe.Pointer(cTLSProtoVersion), unsafe.Pointer(cInnerEAPTypeName),
-		unsafe.Pointer(cLastTimestamp), unsafe.Pointer(cUniqueID),
+		unsafe.Pointer(cLastTimestamp), unsafe.Pointer(cAuthSince), unsafe.Pointer(cUniqueID),
 	} {
 		C.free(p) // free(NULL) is a no-op
 	}
@@ -501,6 +515,10 @@ func (productionBackend) GetStatus(ifname string) (Dot1XStatus, error) {
 	s, err := statusFromEAPOL(ifname, r)
 	if err == nil {
 		applyDarwinProfile(&s)
+		// The interface's current (possibly private/randomized) address.
+		if i, ierr := net.InterfaceByName(ifname); ierr == nil && len(i.HardwareAddr) == 6 {
+			s.MACAddress = macAddrString(i.HardwareAddr)
+		}
 	}
 	return s, err
 }

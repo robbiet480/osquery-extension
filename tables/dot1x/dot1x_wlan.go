@@ -204,9 +204,7 @@ func wlanStatus(c wlanClient, ifname string) (Dot1XStatus, error) {
 	if err := applyOneXSecurity(&s, conn.IsState, oneX); err != nil {
 		return s, err
 	}
-	if conn.IsState == wlanIfaceStateConnected {
-		s.LastStatusTimestamp = wlanAuthTimestamp(c, s.UniqueIdentifier)
-	}
+	applyWlanEvents(c, &s, conn.IsState)
 
 	if loadProfile() {
 		applyProfile(&s, profile)

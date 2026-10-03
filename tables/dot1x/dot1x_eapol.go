@@ -34,6 +34,7 @@ type eapolRaw struct {
 	innerEAPType                 int
 	innerEAPTypeName             string
 	lastStatusTimestamp          string
+	authenticatedSince           string // eap8021x "Timestamp": when the session first became Authenticated
 	uniqueIdentifier             string
 }
 
@@ -57,6 +58,9 @@ func statusFromEAPOL(ifname string, r eapolRaw) (Dot1XStatus, error) {
 		InnerEAPTypeName:             r.innerEAPTypeName,
 		LastStatusTimestamp:          r.lastStatusTimestamp,
 		UniqueIdentifier:             r.uniqueIdentifier,
+	}
+	if r.supplicantState == 4 { // Authenticated
+		s.AuthenticatedSince = r.authenticatedSince
 	}
 	if r.domainSpecificErrorPresent {
 		v := r.domainSpecificError
