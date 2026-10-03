@@ -17,7 +17,7 @@ WHERE supplicant_state_name != 'Authenticated';
 | `interface` | TEXT | Interface name: BSD name on macOS (`en0`), adapter description on Windows | ✓ | ✓ |
 | `interface_type` | TEXT | `wifi` or `ethernet` | ✓ | ✓ |
 | `ssid` | TEXT | Wi-Fi network name (see [SSID on macOS](#ssid-on-macos)) | ✓ Wi-Fi | ✓ Wi-Fi |
-| `profile_name` | TEXT | Name of the configuration behind the connection: the WLAN profile on Windows, the EAPOLClientProfile (`UserDefinedName`, e.g. `WiFi (Campus)`) on macOS | ✓ profile-based | ✓ Wi-Fi |
+| `profile_name` | TEXT | Name of the configuration behind the connection. macOS: the EAPOLClientProfile name, i.e. the 802.1X payload's `PayloadDisplayName`, or `WiFi (<SSID>)` when the payload has none (not the configuration profile's own name; use `mdm_payload_uuid` for that). Windows: the WLAN profile name (MDM-pushed or hand-joined, usually the SSID) | ✓ profile-based | ✓ Wi-Fi |
 | `mdm_payload_uuid` | TEXT | `PayloadUUID` of the configuration-profile 802.1X payload (Wi-Fi or Ethernet) that installed the profile (see [Which MDM profile?](#which-mdm-profile-is-controlling-the-connection)) | ✓ | — |
 | `state` / `state_name` | INTEGER / TEXT | EAPOL control state: 0 Idle, 1 Starting, 2 Running, 3 Stopping | ✓ | ✓ |
 | `supplicant_state` / `supplicant_state_name` | INTEGER / TEXT | 0 Disconnected, 1 Connecting, 2 Acquired, 3 Authenticating, 4 Authenticated, 5 Held, 6 Logoff, 7 Inactive, 8 No Authenticator | ✓ | ✓ |
