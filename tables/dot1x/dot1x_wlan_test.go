@@ -447,3 +447,28 @@ func readTestdata(t *testing.T, name string) string {
 	require.NoError(t, err)
 	return string(b)
 }
+
+// Windows has no built-in osquery source for the SSID (wifi_status is
+// macOS-only), so the connected network's SSID comes from wlanapi.
+func TestWlanStatusSSID(t *testing.T) {
+	t.Parallel()
+	a := connAttrs(wlanIfaceStateConnected, true, "Campus")
+	a.AssociationAttributes.Dot11Ssid.SSIDLength = 6
+	copy(a.AssociationAttributes.Dot11Ssid.SSID[:], "Campus")
+	c := newFake(t, wlanIfaceStateConnected, a, sampleProfileXML)
+	c.conn = connBuf(t, a)
+
+	s, err := wlanStatus(c, testIface)
+	require.NoError(t, err)
+	assert.Equal(t, "Campus", s.SSID)
+}
+
+func TestDecodeSSIDClampsLength(t *testing.T) {
+	t.Parallel()
+	var d dot11SSID
+	copy(d.SSID[:], "abc")
+	d.SSIDLength = 99 // corrupt: longer than the 32-byte buffer
+	assert.Equal(t, "abc"+string(make([]byte, 29)), ssidString(d))
+	d.SSIDLength = 3
+	assert.Equal(t, "abc", ssidString(d))
+}

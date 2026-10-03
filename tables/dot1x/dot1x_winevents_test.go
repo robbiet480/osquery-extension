@@ -336,6 +336,7 @@ func TestWlanStatusIdleFailureRow(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, Dot1XStatus{
 		Interface:               testIface,
+		SSID:                    "dot1x-test",
 		State:                   0, // Idle
 		SupplicantState:         5, // Held
 		EAPType:                 -1,
@@ -557,4 +558,11 @@ func TestApplyFailureNormalizes(t *testing.T) {
 	assert.Equal(t, "0x50005", s.FailureCode)
 	assert.Equal(t, 1, s.ClientStatus)
 	assert.Equal(t, "Failed", rowFromStatus(s)["client_status_name"])
+}
+
+func TestWlanIdleFailureRowSSID(t *testing.T) {
+	t.Parallel()
+	var s Dot1XStatus
+	applyFailure(&s, loadEvent(t, "wlan-12013"))
+	assert.Equal(t, "dot1x-test", s.SSID)
 }

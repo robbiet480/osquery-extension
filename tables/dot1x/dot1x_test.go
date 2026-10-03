@@ -51,7 +51,7 @@ func (s stubLister) interfaceNames() []string { return s.names }
 func TestDot1XStatusColumns(t *testing.T) {
 	t.Parallel()
 	want := []string{
-		"interface", "state", "state_name",
+		"interface", "ssid", "state", "state_name",
 		"supplicant_state", "supplicant_state_name",
 		"eap_type", "eap_type_name",
 		"client_status", "client_status_name",
@@ -754,4 +754,10 @@ func TestRowFromStatusClientStatusName(t *testing.T) {
 	} {
 		assert.Equal(t, want, rowFromStatus(Dot1XStatus{ClientStatus: status})["client_status_name"], "status %d", status)
 	}
+}
+
+func TestRowFromStatusSSID(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "Campus", rowFromStatus(Dot1XStatus{SSID: "Campus"})["ssid"])
+	assert.Equal(t, "", rowFromStatus(Dot1XStatus{})["ssid"])
 }

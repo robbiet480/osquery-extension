@@ -131,6 +131,7 @@ func applyFailure(s *Dot1XStatus, e winEvent) {
 	s.ClientStatus = 1
 	s.FailureReason = oneLine(e.Data["ReasonText"])
 	s.FailureCode = e.Data["ReasonCode"]
+	s.SSID = e.Data["SSID"] // WLAN only; wired events have none
 	mac := e.Data["SwitchMAC"]
 	if mac == "" {
 		mac = e.Data["PeerMac"]

@@ -21,6 +21,7 @@ import (
 // or the Wired AutoConfig event log and LAN profile (Ethernet).
 type Dot1XStatus struct {
 	Interface                    string
+	SSID                         string // Windows Wi-Fi only; on macOS join wifi_status
 	State                        int    // EAPOLControlState: 0=Idle,1=Starting,2=Running,3=Stopping
 	SupplicantState              int    // 802.1X supplicant state machine value
 	EAPType                      int    // EAP method code (e.g. 13=TLS)
@@ -148,6 +149,7 @@ const modeMachineOrUser = 4
 func Dot1XStatusColumns() []table.ColumnDefinition {
 	return []table.ColumnDefinition{
 		table.TextColumn("interface"),
+		table.TextColumn("ssid"),
 		table.IntegerColumn("state"),
 		table.TextColumn("state_name"),
 		table.IntegerColumn("supplicant_state"),
@@ -269,6 +271,7 @@ func interfacesToQuery(backend Dot1XBackend, queryContext table.QueryContext) []
 func rowFromStatus(s Dot1XStatus) map[string]string {
 	row := map[string]string{
 		"interface":                       s.Interface,
+		"ssid":                            s.SSID,
 		"state":                           itoa(s.State),
 		"state_name":                      lookupName(stateNames, s.State),
 		"supplicant_state":                itoa(s.SupplicantState),

@@ -175,6 +175,7 @@ func wlanStatus(c wlanClient, ifname string) (Dot1XStatus, error) {
 	}
 
 	s.AuthenticatorMACAddress = macAddrString(conn.AssociationAttributes.Dot11Bssid[:])
+	s.SSID = ssidString(conn.AssociationAttributes.Dot11Ssid)
 
 	// The profile is fetched lazily and at most once. A fetch failure is
 	// non-fatal: the row is still valid without the profile-derived fields.
@@ -285,4 +286,10 @@ func utf16ToString(s []uint16) string {
 		}
 	}
 	return string(utf16.Decode(s))
+}
+
+// ssidString returns the SSID bytes, clamping a corrupt length to the buffer.
+func ssidString(d dot11SSID) string {
+	n := min(int(d.SSIDLength), len(d.SSID))
+	return string(d.SSID[:n])
 }
