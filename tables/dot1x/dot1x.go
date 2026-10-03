@@ -24,7 +24,7 @@ type Dot1XStatus struct {
 	InterfaceType                string // "wifi", "ethernet", or "" if unknown
 	SSID                         string // Wi-Fi network name
 	ProfileName                  string // WLAN profile (Windows) / EAPOLClientProfile (macOS) name
-	MDMPayloadUUID               string // macOS: com.apple.wifi.managed PayloadUUID behind the profile
+	MDMPayloadUUID               string // macOS: PayloadUUID of the Wi-Fi/Ethernet 802.1X payload behind the profile
 	State                        int    // EAPOLControlState: 0=Idle,1=Starting,2=Running,3=Stopping
 	SupplicantState              int    // 802.1X supplicant state machine value
 	EAPType                      int    // EAP method code (e.g. 13=TLS)

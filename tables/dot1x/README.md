@@ -18,7 +18,7 @@ WHERE supplicant_state_name != 'Authenticated';
 | `interface_type` | TEXT | `wifi` or `ethernet` | ✓ | ✓ |
 | `ssid` | TEXT | Wi-Fi network name (see [SSID on macOS](#ssid-on-macos)) | ✓ Wi-Fi | ✓ Wi-Fi |
 | `profile_name` | TEXT | Name of the configuration behind the connection: the WLAN profile on Windows, the EAPOLClientProfile (`UserDefinedName`, e.g. `WiFi (Campus)`) on macOS | ✓ profile-based | ✓ Wi-Fi |
-| `mdm_payload_uuid` | TEXT | `PayloadUUID` of the `com.apple.wifi.managed` payload that installed the profile (see [Which MDM profile?](#which-mdm-profile-is-controlling-the-connection)) | ✓ | — |
+| `mdm_payload_uuid` | TEXT | `PayloadUUID` of the configuration-profile 802.1X payload (Wi-Fi or Ethernet) that installed the profile (see [Which MDM profile?](#which-mdm-profile-is-controlling-the-connection)) | ✓ | — |
 | `state` / `state_name` | INTEGER / TEXT | EAPOL control state: 0 Idle, 1 Starting, 2 Running, 3 Stopping | ✓ | ✓ |
 | `supplicant_state` / `supplicant_state_name` | INTEGER / TEXT | 0 Disconnected, 1 Connecting, 2 Acquired, 3 Authenticating, 4 Authenticated, 5 Held, 6 Logoff, 7 Inactive, 8 No Authenticator | ✓ | ✓ |
 | `eap_type` / `eap_type_name` | INTEGER / TEXT | Outer EAP method (13 EAP-TLS, 21 EAP-TTLS, 25 PEAP, …) | ✓ | ✓ |
@@ -70,7 +70,7 @@ The EAPOL status has no SSID, and every public macOS source (CoreWLAN, `networks
 
 #### Which MDM profile is controlling the connection?
 
-`unique_identifier` is eap8021x's own profile ID, generated locally. The link to MDM is `mdm_payload_uuid`, the `PayloadUUID` of the `com.apple.wifi.managed` payload that installed the 802.1X profile. Look it up in your MDM, or on the Mac:
+`unique_identifier` is eap8021x's own profile ID, generated locally. The link to MDM is `mdm_payload_uuid`, the `PayloadUUID` of the payload that installed the 802.1X profile: `com.apple.wifi.managed` for Wi-Fi, or an Ethernet payload such as `com.apple.globalethernet.managed` / `com.apple.firstactiveethernet.managed` for wired. It works for both and is empty for networks configured by hand. Look it up in your MDM, or on the Mac:
 
 ```sh
 sudo profiles show -type configuration | grep -B20 '<mdm_payload_uuid>'
