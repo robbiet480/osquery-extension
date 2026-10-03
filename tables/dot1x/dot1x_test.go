@@ -55,7 +55,7 @@ func TestDot1XStatusColumns(t *testing.T) {
 		"supplicant_state", "supplicant_state_name",
 		"eap_type", "eap_type_name",
 		"client_status", "client_status_name",
-		"failure_reason", "failure_code",
+		"failure_reason", "failure_code", "failure_eap_code",
 		"domain_specific_error",
 		"authenticator_mac_address",
 		"mode", "mode_name",
@@ -63,7 +63,10 @@ func TestDot1XStatusColumns(t *testing.T) {
 		"tls_server_certificate_chain",
 		"tls_server_certificate_sha1",
 		"tls_server_certificate_serials",
+		"tls_server_certificate_not_after",
 		"tls_trusted_root_ca_sha1",
+		"tls_trusted_server_names",
+		"server_validation",
 		"tls_trust_client_status",
 		"tls_negotiated_protocol_version",
 		"tls_negotiated_cipher",
@@ -189,9 +192,19 @@ func TestRowFromStatus(t *testing.T) {
 		UniqueIdentifier:             "abc-123",
 		FailureReason:                "Explicit Eap failure received",
 		FailureCode:                  "0x50005",
+		FailureEAPCode:               "0x80420015",
+		TLSServerCertificateNotAfter: "2027-01-02T03:04:05Z",
+		TLSTrustedRootCASHA1:         "58:34:c1:13:14:9c:fc:9b:9f:28:70:6f:db:e6:81:a4:78:19:a2:0e",
+		TLSTrustedServerNames:        "radius1.campus.edu,radius2.campus.edu",
+		ServerValidation:             "pinned",
 	}
 
 	row := rowFromStatus(s)
+	assert.Equal(t, "0x80420015", row["failure_eap_code"])
+	assert.Equal(t, "2027-01-02T03:04:05Z", row["tls_server_certificate_not_after"])
+	assert.Equal(t, "58:34:c1:13:14:9c:fc:9b:9f:28:70:6f:db:e6:81:a4:78:19:a2:0e", row["tls_trusted_root_ca_sha1"])
+	assert.Equal(t, "radius1.campus.edu,radius2.campus.edu", row["tls_trusted_server_names"])
+	assert.Equal(t, "pinned", row["server_validation"])
 	assert.Equal(t, "Explicit Eap failure received", row["failure_reason"])
 	assert.Equal(t, "0x50005", row["failure_code"])
 	assert.Equal(t, "en0", row["interface"])
@@ -484,11 +497,11 @@ func TestParseTLSCertChain(t *testing.T) {
 
 	t.Run("empty", func(t *testing.T) {
 		t.Parallel()
-		subj, sha1s, serials := parseTLSCertChain(nil)
+		subj, sha1s, serials, _ := parseTLSCertChain(nil)
 		assert.Equal(t, "", subj)
 		assert.Equal(t, "", sha1s)
 		assert.Equal(t, "", serials)
-		subj, sha1s, serials = parseTLSCertChain([]byte{})
+		subj, sha1s, serials, _ = parseTLSCertChain([]byte{})
 		assert.Equal(t, "", subj)
 		assert.Equal(t, "", sha1s)
 		assert.Equal(t, "", serials)
@@ -496,7 +509,7 @@ func TestParseTLSCertChain(t *testing.T) {
 
 	t.Run("truncated length prefix", func(t *testing.T) {
 		t.Parallel()
-		subj, sha1s, serials := parseTLSCertChain([]byte{0x00, 0x00, 0x00})
+		subj, sha1s, serials, _ := parseTLSCertChain([]byte{0x00, 0x00, 0x00})
 		assert.Equal(t, "", subj)
 		assert.Equal(t, "", sha1s)
 		assert.Equal(t, "", serials)
@@ -505,7 +518,7 @@ func TestParseTLSCertChain(t *testing.T) {
 	t.Run("invalid DER", func(t *testing.T) {
 		t.Parallel()
 		packed := []byte{0x00, 0x00, 0x00, 0x04, 'n', 'o', 'p', 'e'}
-		subj, sha1s, serials := parseTLSCertChain(packed)
+		subj, sha1s, serials, _ := parseTLSCertChain(packed)
 		assert.Equal(t, "", subj)
 		assert.Equal(t, "", sha1s)
 		assert.Equal(t, "", serials)
@@ -514,7 +527,7 @@ func TestParseTLSCertChain(t *testing.T) {
 	t.Run("length exceeds buffer", func(t *testing.T) {
 		t.Parallel()
 		packed := []byte{0x00, 0x00, 0x00, 0xff, 0x00}
-		subj, sha1s, serials := parseTLSCertChain(packed)
+		subj, sha1s, serials, _ := parseTLSCertChain(packed)
 		assert.Equal(t, "", subj)
 		assert.Equal(t, "", sha1s)
 		assert.Equal(t, "", serials)
@@ -539,7 +552,7 @@ func TestParseTLSCertChain(t *testing.T) {
 		binary.BigEndian.PutUint32(buf, uint32(len(der)))
 		copy(buf[4:], der)
 
-		subj, sha1s, serials := parseTLSCertChain(buf)
+		subj, sha1s, serials, _ := parseTLSCertChain(buf)
 		assert.Equal(t, "CN=test.example.com,O=Test Org", subj)
 		h := sha1.Sum(der)
 		expectedSHA1 := fmt.Sprintf("%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x:%02x",
@@ -570,7 +583,7 @@ func TestParseTLSCertChain(t *testing.T) {
 		binary.BigEndian.PutUint32(buf[4:8], uint32(len(der)))
 		copy(buf[8:], der)
 
-		subj, sha1s, serials := parseTLSCertChain(buf)
+		subj, sha1s, serials, _ := parseTLSCertChain(buf)
 		assert.Equal(t, "CN=valid.example.com", subj)
 		assert.NotEmpty(t, sha1s)
 		assert.Equal(t, "3e7", serials) // 999 in hex (lowercase from Text(16))
@@ -597,7 +610,7 @@ func TestParseTLSCertChain(t *testing.T) {
 		binary.BigEndian.PutUint32(buf[4+len(der)+len(invalidBuf):], uint32(len(der)))
 		copy(buf[4+len(der)+len(invalidBuf)+4:], der)
 
-		subj, sha1s, serials := parseTLSCertChain(buf)
+		subj, sha1s, serials, _ := parseTLSCertChain(buf)
 		parts := strings.Split(subj, "|")
 		assert.Len(t, parts, 2)
 		assert.Len(t, strings.Split(sha1s, ","), 2)
@@ -829,14 +842,21 @@ func TestEAPOLProfileInfo(t *testing.T) {
 	got := eapolProfileInfo(b, "11111111-2222-3333-4444-555555555555")
 	assert.Equal(t, eapolProfile{
 		ssid: "CorpWiFi", name: "WiFi (CorpWiFi)", payloadUUID: "ABCDEF01-2345-6789-ABCD-EF0123456789",
-		identity: "anonymous@campus.edu",
-	}, got, "OuterIdentity wins over UserName")
+		identity:           "anonymous@campus.edu",
+		trustedServerNames: "radius1.campus.edu,radius2.campus.edu",
+		serverValidation:   "pinned",
+	}, got, "OuterIdentity wins over UserName; trusted certs + names")
 
 	got = eapolProfileInfo(b, "66666666-7777-8888-9999-000000000000")
-	assert.Equal(t, eapolProfile{name: "Wired (no WLAN)", identity: "host/wired01.campus.edu"}, got, "no WLAN binding, not from MDM; UserName only")
+	assert.Equal(t, eapolProfile{
+		name: "Wired (no WLAN)", identity: "host/wired01.campus.edu", serverValidation: "ca_only",
+	}, got, "no WLAN binding, not from MDM; UserName only; trusted certs only")
 
 	got = eapolProfileInfo(b, "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
-	assert.Equal(t, eapolProfile{name: "EAP-TLS (certificate only)"}, got, "no UserName/OuterIdentity")
+	assert.Equal(t, eapolProfile{name: "EAP-TLS (certificate only)", serverValidation: "prompt"}, got, "no UserName/OuterIdentity, nothing pinned")
+
+	got = eapolProfileInfo(b, "bbbbbbbb-cccc-dddd-eeee-ffffffffffff")
+	assert.Equal(t, eapolProfile{name: "Names only", trustedServerNames: "*.campus.edu", serverValidation: "name_only"}, got)
 
 	assert.Equal(t, eapolProfile{}, eapolProfileInfo(b, "unknown"))
 	assert.Equal(t, eapolProfile{}, eapolProfileInfo(nil, "11111111-2222-3333-4444-555555555555"))
@@ -847,4 +867,13 @@ func TestRowFromStatusProfileColumns(t *testing.T) {
 	row := rowFromStatus(Dot1XStatus{ProfileName: "Campus", MDMPayloadUUID: "ABC"})
 	assert.Equal(t, "Campus", row["profile_name"])
 	assert.Equal(t, "ABC", row["mdm_payload_uuid"])
+}
+
+func TestServerValidation(t *testing.T) {
+	t.Parallel()
+	assert.Equal(t, "pinned", serverValidation(true, true, true))
+	assert.Equal(t, "ca_only", serverValidation(true, false, true))
+	assert.Equal(t, "name_only", serverValidation(false, true, true))
+	assert.Equal(t, "prompt", serverValidation(false, false, true))
+	assert.Equal(t, "none", serverValidation(true, true, false), "validation disabled overrides pinning")
 }

@@ -359,3 +359,114 @@ func TestParseWLANProfileOneXXSBoolean(t *testing.T) {
 		assert.Equal(t, want, parseWLANProfile("<WLANProfile>"+in+"</WLANProfile>").useOneX, in)
 	}
 }
+
+// peapXML builds a PEAP OneX config whose outer method has the given
+// ServerValidation children and PeapExtensions, wrapping an inner EAP-TLS
+// method with its own ServerValidation and extra elements (which must be
+// ignored: the inner method validates nothing about the outer tunnel).
+func peapXML(outerSV, peapExt, innerSV, innerExtra string) string {
+	return `<OneX><EAPConfig><EapHostConfig><EapMethod><Type>25</Type></EapMethod><Config>` +
+		`<Eap><Type>25</Type><EapType><ServerValidation>` + outerSV + `</ServerValidation>` +
+		`<Eap><Type>13</Type><EapType><ServerValidation>` + innerSV + `</ServerValidation>` + innerExtra + `</EapType></Eap>` +
+		`<PeapExtensions>` + peapExt + `</PeapExtensions></EapType></Eap></Config></EapHostConfig></EAPConfig></OneX>`
+}
+
+const testCA = `<TrustedRootCA>58 34 c1 13 14 9c fc 9b 9f 28 70 6f db e6 81 a4 78 19 a2 0e</TrustedRootCA>`
+
+// Server names and the server validation summary come from the OUTER
+// method's ServerValidation (PEAP/EAP-TLS) or EapTtls ServerValidation (TTLS),
+// plus the V2 PerformServerValidation / AcceptServerName switches.
+func TestParseWLANProfileServerValidation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		xml       string
+		wantNames string
+		wantSV    string
+	}{
+		{"fixture lanprofile-eap-tls-machine", readTestdata(t, "lanprofile-eap-tls-machine.xml"), "", "ca_only"},
+		{"fixture peap-mschapv2", readTestdata(t, "wlanprofile-peap-mschapv2.xml"), "", "prompt"},
+		{"fixture peap-tls", readTestdata(t, "wlanprofile-peap-tls.xml"), "", "prompt"},
+		{"fixture ttls-eapmschapv2", readTestdata(t, "wlanprofile-ttls-eapmschapv2.xml"), "", "prompt"},
+		{"fixture ttls-pap", readTestdata(t, "wlanprofile-ttls-pap.xml"), "", "prompt"},
+		{"fixture ttls-pap-windows-ui", readTestdata(t, "wlanprofile-ttls-pap-windows-ui.xml"), "", "ca_only"},
+		{"sample EAP-TLS", sampleProfileXML, "", "ca_only"},
+		{"sample PEAP", peapProfileXML, "", "ca_only"},
+		{
+			"PEAP pinned; inner names and inner PerformServerValidation ignored",
+			peapXML(`<ServerNames>radius1.campus.edu; radius2.campus.edu</ServerNames>`+testCA, "",
+				`<ServerNames>inner.campus.edu</ServerNames>`, `<PerformServerValidation>false</PerformServerValidation>`),
+			"radius1.campus.edu,radius2.campus.edu", "pinned",
+		},
+		{
+			"PEAP PerformServerValidation true",
+			peapXML(`<ServerNames>radius.campus.edu</ServerNames>`+testCA, `<PerformServerValidation>true</PerformServerValidation><AcceptServerName>true</AcceptServerName>`, "", ""),
+			"radius.campus.edu", "pinned",
+		},
+		{
+			"PEAP PerformServerValidation false",
+			peapXML(`<ServerNames>radius.campus.edu</ServerNames>`+testCA, `<PerformServerValidation>false</PerformServerValidation>`, "", ""),
+			"radius.campus.edu", "none",
+		},
+		{
+			"PerformServerValidation xs:boolean 0",
+			peapXML("", `<PerformServerValidation> 0 </PerformServerValidation>`, "", ""),
+			"", "none",
+		},
+		{
+			"PerformServerValidation attribute",
+			`<OneX><Eap><Type>25</Type><EapType><ServerValidation PerformServerValidation="false">` + testCA + `</ServerValidation></EapType></Eap></OneX>`,
+			"", "none",
+		},
+		{
+			"EAP-TLS V2 PerformServerValidation false",
+			`<OneX><Eap><Type>13</Type><EapType><ServerValidation>` + testCA + `</ServerValidation><PerformServerValidation>false</PerformServerValidation></EapType></Eap></OneX>`,
+			"", "none",
+		},
+		{
+			"AcceptServerName false: names configured but not enforced",
+			peapXML(`<ServerNames>radius.campus.edu</ServerNames>`+testCA, `<AcceptServerName>false</AcceptServerName>`, "", ""),
+			"radius.campus.edu", "ca_only",
+		},
+		{
+			"names only",
+			peapXML(`<ServerNames>radius.campus.edu</ServerNames>`, "", "", ""),
+			"radius.campus.edu", "name_only",
+		},
+		{
+			"empty name segments dropped",
+			peapXML(`<ServerNames> radius.campus.edu ;; </ServerNames>`+testCA, "", "", ""),
+			"radius.campus.edu", "pinned",
+		},
+		{
+			"TTLS",
+			`<OneX><EapTtls><ServerValidation><ServerNames>a.campus.edu;b.campus.edu</ServerNames>` +
+				`<TrustedRootCAHash>58 34 c1 13 14 9c fc 9b 9f 28 70 6f db e6 81 a4 78 19 a2 0e</TrustedRootCAHash>` +
+				`<DisablePrompt>true</DisablePrompt></ServerValidation><Phase2Authentication><EapHostConfig>` +
+				`<EapMethod><Type>26</Type></EapMethod><Config><Eap><Type>26</Type><EapType/></Eap></Config>` +
+				`</EapHostConfig></Phase2Authentication></EapTtls></OneX>`,
+			"a.campus.edu,b.campus.edu", "pinned",
+		},
+		{
+			"TTLS inner EAP-TLS validation ignored",
+			`<OneX><EapTtls><ServerValidation>` + testCA + `</ServerValidation><Phase2Authentication><EapHostConfig>` +
+				`<EapMethod><Type>13</Type></EapMethod><Config><Eap><Type>13</Type><EapType><ServerValidation>` +
+				`<ServerNames>inner.campus.edu</ServerNames></ServerValidation><PerformServerValidation>false</PerformServerValidation>` +
+				`</EapType></Eap></Config></EapHostConfig></Phase2Authentication></EapTtls></OneX>`,
+			"", "ca_only",
+		},
+		{"not 802.1X", `<WLANProfile><name>psk</name></WLANProfile>`, "", ""},
+		{"empty", "", "", ""},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			info := parseWLANProfile(tc.xml)
+			assert.Equal(t, tc.wantNames, info.trustedServerNames, "trusted server names")
+			assert.Equal(t, tc.wantSV, info.serverValidation, "server validation")
+		})
+	}
+}

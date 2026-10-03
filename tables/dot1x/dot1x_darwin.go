@@ -392,7 +392,8 @@ const knownNetworksPlist = "/Library/Preferences/com.apple.wifi.known-networks.p
 // (world-readable).
 const eapolClientConfigPlist = "/Library/Preferences/SystemConfiguration/com.apple.network.eapolclient.configuration.plist"
 
-// applyDarwinProfile fills ssid, profile_name, mdm_payload_uuid and identity, which the
+// applyDarwinProfile fills ssid, profile_name, mdm_payload_uuid, identity,
+// tls_trusted_server_names and server_validation, which the
 // EAPOL status doesn't carry: exactly from the session's EAPOLClientProfile
 // when it is profile-based (UniqueIdentifier is the profile ID), with the
 // SSID otherwise matched from the BSSID against known networks (root + Full
@@ -402,6 +403,7 @@ func applyDarwinProfile(s *Dot1XStatus) {
 		if b, err := os.ReadFile(eapolClientConfigPlist); err == nil {
 			p := eapolProfileInfo(b, s.UniqueIdentifier)
 			s.ProfileName, s.MDMPayloadUUID, s.Identity = p.name, p.payloadUUID, p.identity
+			s.TLSTrustedServerNames, s.ServerValidation = p.trustedServerNames, p.serverValidation
 			if s.InterfaceType == "wifi" {
 				s.SSID = p.ssid
 			}

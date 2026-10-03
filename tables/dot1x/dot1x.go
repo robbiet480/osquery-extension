@@ -32,6 +32,7 @@ type Dot1XStatus struct {
 	ClientStatus                 int    // 0=ok, nonzero=error code
 	FailureReason                string // Windows: event log ReasonText of the last 802.1X failure
 	FailureCode                  string // Windows: event log ReasonCode of the last 802.1X failure (e.g. "0x50005")
+	FailureEAPCode               string // Windows: event log EAPReasonCode of the last 802.1X failure (e.g. "0x80420015")
 	DomainSpecificError          *int   // Apple OSStatus (may be negative); nil = absent
 	AuthenticatorMACAddress      string // colon-separated
 	Mode                         int    // 0=None,1=User,2=LoginWindow,3=System,4=MachineOrUser (Windows)
@@ -39,7 +40,10 @@ type Dot1XStatus struct {
 	TLSServerCertificateChain    string // pipe-separated subject DNs in LDAP notation
 	TLSServerCertificateSHA1     string // comma-separated colon-separated SHA-1 fingerprints
 	TLSServerCertificateSerials  string // comma-separated hex serial numbers
+	TLSServerCertificateNotAfter string // ISO 8601 expiry of the leaf (first) server certificate
 	TLSTrustedRootCASHA1         string // comma-separated SHA-1 thumbprints of the trusted root CAs configured for server validation (Windows profile)
+	TLSTrustedServerNames        string // comma-separated server names the profile requires the server certificate to match
+	ServerValidation             string // pinned, ca_only, name_only, prompt, none; "" if no profile (see serverValidation)
 	TLSTrustClientStatus         int    // trust evaluation error code (0=ok)
 	TLSNegotiatedProtocolVersion string // "1.2" or "1.3"
 	TLSNegotiatedCipher          int    // TLS cipher suite code
@@ -169,6 +173,7 @@ func Dot1XStatusColumns() []table.ColumnDefinition {
 		table.TextColumn("client_status_name"),
 		table.TextColumn("failure_reason"),
 		table.TextColumn("failure_code"),
+		table.TextColumn("failure_eap_code"),
 		table.IntegerColumn("domain_specific_error"),
 		table.TextColumn("authenticator_mac_address"),
 		table.IntegerColumn("mode"),
@@ -177,7 +182,10 @@ func Dot1XStatusColumns() []table.ColumnDefinition {
 		table.TextColumn("tls_server_certificate_chain"),
 		table.TextColumn("tls_server_certificate_sha1"),
 		table.TextColumn("tls_server_certificate_serials"),
+		table.TextColumn("tls_server_certificate_not_after"),
 		table.TextColumn("tls_trusted_root_ca_sha1"),
+		table.TextColumn("tls_trusted_server_names"),
+		table.TextColumn("server_validation"),
 		table.IntegerColumn("tls_trust_client_status"),
 		table.TextColumn("tls_negotiated_protocol_version"),
 		table.IntegerColumn("tls_negotiated_cipher"),
@@ -282,40 +290,44 @@ func interfacesToQuery(backend Dot1XBackend, queryContext table.QueryContext) []
 
 func rowFromStatus(s Dot1XStatus) map[string]string {
 	row := map[string]string{
-		"interface":                       s.Interface,
-		"interface_type":                  s.InterfaceType,
-		"ssid":                            s.SSID,
-		"profile_name":                    s.ProfileName,
-		"mdm_payload_uuid":                s.MDMPayloadUUID,
-		"state":                           itoa(s.State),
-		"state_name":                      lookupName(stateNames, s.State),
-		"supplicant_state":                itoa(s.SupplicantState),
-		"supplicant_state_name":           lookupName(supplicantStateNames, s.SupplicantState),
-		"eap_type":                        itoa(s.EAPType),
-		"eap_type_name":                   "",
-		"client_status":                   itoa(s.ClientStatus),
-		"client_status_name":              lookupName(clientStatusNames, s.ClientStatus),
-		"failure_reason":                  s.FailureReason,
-		"failure_code":                    s.FailureCode,
-		"domain_specific_error":           optItoa(s.DomainSpecificError),
-		"authenticator_mac_address":       s.AuthenticatorMACAddress,
-		"mode":                            itoa(s.Mode),
-		"mode_name":                       lookupName(modeNames, s.Mode),
-		"tls_session_was_resumed":         itoa(s.TLSSessionWasResumed),
-		"tls_server_certificate_chain":    s.TLSServerCertificateChain,
-		"tls_server_certificate_sha1":     s.TLSServerCertificateSHA1,
-		"tls_server_certificate_serials":  s.TLSServerCertificateSerials,
-		"tls_trusted_root_ca_sha1":        s.TLSTrustedRootCASHA1,
-		"tls_trust_client_status":         itoa(s.TLSTrustClientStatus),
-		"tls_negotiated_protocol_version": s.TLSNegotiatedProtocolVersion,
-		"tls_negotiated_cipher":           itoa(s.TLSNegotiatedCipher),
-		"inner_eap_type":                  itoa(s.InnerEAPType),
-		"inner_eap_type_name":             "",
-		"last_status_timestamp":           s.LastStatusTimestamp,
-		"authenticated_since":             s.AuthenticatedSince,
-		"mac_address":                     s.MACAddress,
-		"identity":                        s.Identity,
-		"unique_identifier":               s.UniqueIdentifier,
+		"interface":                        s.Interface,
+		"interface_type":                   s.InterfaceType,
+		"ssid":                             s.SSID,
+		"profile_name":                     s.ProfileName,
+		"mdm_payload_uuid":                 s.MDMPayloadUUID,
+		"state":                            itoa(s.State),
+		"state_name":                       lookupName(stateNames, s.State),
+		"supplicant_state":                 itoa(s.SupplicantState),
+		"supplicant_state_name":            lookupName(supplicantStateNames, s.SupplicantState),
+		"eap_type":                         itoa(s.EAPType),
+		"eap_type_name":                    "",
+		"client_status":                    itoa(s.ClientStatus),
+		"client_status_name":               lookupName(clientStatusNames, s.ClientStatus),
+		"failure_reason":                   s.FailureReason,
+		"failure_code":                     s.FailureCode,
+		"failure_eap_code":                 s.FailureEAPCode,
+		"domain_specific_error":            optItoa(s.DomainSpecificError),
+		"authenticator_mac_address":        s.AuthenticatorMACAddress,
+		"mode":                             itoa(s.Mode),
+		"mode_name":                        lookupName(modeNames, s.Mode),
+		"tls_session_was_resumed":          itoa(s.TLSSessionWasResumed),
+		"tls_server_certificate_chain":     s.TLSServerCertificateChain,
+		"tls_server_certificate_sha1":      s.TLSServerCertificateSHA1,
+		"tls_server_certificate_serials":   s.TLSServerCertificateSerials,
+		"tls_server_certificate_not_after": s.TLSServerCertificateNotAfter,
+		"tls_trusted_root_ca_sha1":         s.TLSTrustedRootCASHA1,
+		"tls_trusted_server_names":         s.TLSTrustedServerNames,
+		"server_validation":                s.ServerValidation,
+		"tls_trust_client_status":          itoa(s.TLSTrustClientStatus),
+		"tls_negotiated_protocol_version":  s.TLSNegotiatedProtocolVersion,
+		"tls_negotiated_cipher":            itoa(s.TLSNegotiatedCipher),
+		"inner_eap_type":                   itoa(s.InnerEAPType),
+		"inner_eap_type_name":              "",
+		"last_status_timestamp":            s.LastStatusTimestamp,
+		"authenticated_since":              s.AuthenticatedSince,
+		"mac_address":                      s.MACAddress,
+		"identity":                         s.Identity,
+		"unique_identifier":                s.UniqueIdentifier,
 	}
 	if s.EAPTypeName != "" {
 		row["eap_type_name"] = s.EAPTypeName
@@ -355,15 +367,35 @@ func lookupName(names map[int]string, v int) string {
 	return "Unknown(" + strconv.Itoa(v) + ")"
 }
 
+// serverValidation summarizes how a profile has the client validate the
+// RADIUS server certificate: "none" when validation is switched off,
+// otherwise by what is pinned: "pinned" (trusted CA + server names),
+// "ca_only", "name_only", or "prompt" (nothing pinned; any system-trusted
+// certificate, and the user may be asked to trust an unknown one).
+func serverValidation(caPinned, namesPinned, validate bool) string {
+	switch {
+	case !validate:
+		return "none"
+	case caPinned && namesPinned:
+		return "pinned"
+	case caPinned:
+		return "ca_only"
+	case namesPinned:
+		return "name_only"
+	}
+	return "prompt"
+}
+
 // parseTLSCertChain unpacks a packed buffer of DER certificates (each
 // prefixed with a 4-byte big-endian length) and returns (subject DNs in LDAP
-// notation, SHA-1 fingerprints, serial numbers). DNs are pipe-separated
+// notation, SHA-1 fingerprints, serial numbers, the first (leaf) cert's
+// NotAfter as ISO 8601 UTC). DNs are pipe-separated
 // ("|") because LDAP DNs themselves use commas as RDN separators. If the
 // input is entirely empty the results are empty strings; if parsing of a
 // single cert fails, it is skipped and previously-parsed certs are retained.
-func parseTLSCertChain(packed []byte) (subjects, sha1s, serials string) {
+func parseTLSCertChain(packed []byte) (subjects, sha1s, serials, leafNotAfter string) {
 	if len(packed) == 0 {
-		return "", "", ""
+		return "", "", "", ""
 	}
 	var dnParts, sha1Parts, serialParts []string
 	offset := 0
@@ -385,11 +417,14 @@ func parseTLSCertChain(packed []byte) (subjects, sha1s, serials string) {
 		if err != nil {
 			continue
 		}
+		if len(dnParts) == 0 {
+			leafNotAfter = cert.NotAfter.UTC().Format("2006-01-02T15:04:05Z")
+		}
 		dnParts = append(dnParts, renderRDNSequence(reverseRDNSequence(cert.Subject.ToRDNSequence())))
 		sha1Parts = append(sha1Parts, sha1String(sha1.Sum(cert.Raw)))
 		serialParts = append(serialParts, cert.SerialNumber.Text(16))
 	}
-	return strings.Join(dnParts, "|"), strings.Join(sha1Parts, ","), strings.Join(serialParts, ",")
+	return strings.Join(dnParts, "|"), strings.Join(sha1Parts, ","), strings.Join(serialParts, ","), leafNotAfter
 }
 
 // renderRDNSequence converts an x509 RDN sequence to LDAP notation

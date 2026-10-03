@@ -19,7 +19,11 @@ type wlanProfileInfo struct {
 	innerEAPType      int    // inner/tunneled EAP method type (see parseWLANProfile)
 	authMode          int    // EAPOLControlMode mapped from <authMode>
 	trustedRootCASHA1 string // comma-separated colon-delimited SHA-1 thumbprints
-	useOneX           bool   // <useOneX> (WLAN) or <OneXEnabled> (LAN) is true: the profile is 802.1X
+	// trustedServerNames is the outer method's <ServerNames> (';'-separated
+	// in the profile), comma-joined.
+	trustedServerNames string
+	serverValidation   string // see serverValidation; "" for a non-802.1X profile
+	useOneX            bool   // <useOneX> (WLAN) or <OneXEnabled> (LAN) is true: the profile is 802.1X
 }
 
 // parseWLANProfile extracts every 802.1X field from a WLAN profile XML in a
@@ -31,6 +35,15 @@ type wlanProfileInfo struct {
 // (EAP-TTLS nests a full EapHostConfig under Phase2Authentication); authMode is the first
 // <authMode>; trusted root CA thumbprints are every valid 40-hex-char
 // <TrustedRootCA> (comma-joined).
+//
+// Server validation settings are read from the outer method only (Eap depth
+// <= 1: EAP-TLS/PEAP Config/Eap/EapType, or TTLS EapTtls outside
+// Phase2Authentication); an inner method's own ServerValidation (PEAP Eap
+// depth 2, or TTLS Phase2Authentication) is ignored. They are the outer
+// <ServerNames>, and the Windows 7+ switches <PerformServerValidation> (PEAP
+// PeapExtensions, EAP-TLS V2 EapType, or a ServerValidation attribute; false
+// = no validation at all) and <AcceptServerName> (false = ServerNames is not
+// enforced).
 func parseWLANProfile(xmlStr string) wlanProfileInfo {
 	info := wlanProfileInfo{eapType: -1, innerEAPType: -1, authMode: -1}
 	dec := xml.NewDecoder(strings.NewReader(xmlStr))
@@ -41,21 +54,32 @@ func parseWLANProfile(xmlStr string) wlanProfileInfo {
 	eapDepth := 0 // nesting level of <Eap> elements
 	gotAuthMode := false
 	sawOneX := false
-	var caHashes []string
+	var caHashes, serverNames []string
+	gotServerNames := false
+	inPhase2 := false // inside TTLS Phase2Authentication (the inner method)
+	validate, acceptNames := true, true
 	for {
 		tok, err := dec.Token()
 		if err != nil {
 			break
 		}
-		if ee, ok := tok.(xml.EndElement); ok && ee.Name.Local == "Eap" {
-			eapDepth--
+		if ee, ok := tok.(xml.EndElement); ok {
+			switch ee.Name.Local {
+			case "Eap":
+				eapDepth--
+			case "Phase2Authentication":
+				inPhase2 = false
+			}
 			continue
 		}
 		se, ok := tok.(xml.StartElement)
 		if !ok {
 			continue
 		}
+		outer := eapDepth <= 1 && !inPhase2 // see doc: outer method's settings only
 		switch se.Name.Local {
+		case "Phase2Authentication":
+			inPhase2 = true
 		case "Eap":
 			eapDepth++
 		case "Type":
@@ -91,6 +115,31 @@ func parseWLANProfile(xmlStr string) wlanProfileInfo {
 					gotAuthMode = true
 				}
 			}
+		case "ServerValidation":
+			for _, a := range se.Attr {
+				if outer && a.Name.Local == "PerformServerValidation" && xsFalse(a.Value) {
+					validate = false
+				}
+			}
+		case "ServerNames":
+			if outer && !gotServerNames {
+				if v, ok := readCharData(dec); ok {
+					gotServerNames = true
+					for _, n := range strings.Split(v, ";") {
+						if n = strings.TrimSpace(n); n != "" {
+							serverNames = append(serverNames, n)
+						}
+					}
+				}
+			}
+		case "PerformServerValidation", "AcceptServerName":
+			if v, ok := readCharData(dec); ok && outer && xsFalse(v) {
+				if se.Name.Local == "AcceptServerName" {
+					acceptNames = false
+				} else {
+					validate = false
+				}
+			}
 		case "TrustedRootCA", "TrustedRootCAHash": // PEAP/EAP-TLS, EAP-TTLS
 			if s, ok := readCharData(dec); ok {
 				if hex, ok := normalizeThumbprint(s); ok {
@@ -104,7 +153,17 @@ func parseWLANProfile(xmlStr string) wlanProfileInfo {
 		info.authMode = modeMachineOrUser
 	}
 	info.trustedRootCASHA1 = strings.Join(caHashes, ",")
+	info.trustedServerNames = strings.Join(serverNames, ",")
+	if sawOneX {
+		info.serverValidation = serverValidation(len(caHashes) > 0, len(serverNames) > 0 && acceptNames, validate)
+	}
 	return info
+}
+
+// xsFalse reports whether an xs:boolean value is false ("false" or "0").
+func xsFalse(v string) bool {
+	v = strings.TrimSpace(v)
+	return v == "false" || v == "0"
 }
 
 // readEapMethodType reads forward from just after an <EapMethod> StartElement

@@ -63,6 +63,7 @@ func wiredBase() Dot1XStatus {
 		Mode:                 3,
 		TLSSessionWasResumed: -1,
 		TLSTrustedRootCASHA1: "58:34:c1:13:14:9c:fc:9b:9f:28:70:6f:db:e6:81:a4:78:19:a2:0e",
+		ServerValidation:     "ca_only",
 		TLSTrustClientStatus: -1,
 		TLSNegotiatedCipher:  -1,
 		InnerEAPType:         -1,
@@ -370,6 +371,7 @@ func TestWlanStatusIdleFailureRow(t *testing.T) {
 		UniqueIdentifier:        "{9A82D898-7B57-40AA-A330-E2B99D10BD77}",
 		FailureReason:           "Explicit Eap failure received",
 		FailureCode:             "0x50005",
+		FailureEAPCode:          "0x80420015",
 	}, s)
 	assert.Zero(t, c.connCalls)
 }
@@ -498,12 +500,6 @@ func TestWindowsInterfaceNames(t *testing.T) {
 	w := newFake(t, wlanIfaceStateConnected, connAttrs(wlanIfaceStateConnected, true, "Campus"), sampleProfileXML)
 	d := &fakeWiredClient{ifaces: []wiredIface{testWired(t)}}
 
-	assert.Equal(t, []string{testIface, testWiredIface}, windowsInterfaceNames(w, d))
-
-	// Same name from both sources is listed once.
-	dup := testWired(t)
-	dup.description = testIface
-	d.ifaces = append(d.ifaces, dup)
 	assert.Equal(t, []string{testIface, testWiredIface}, windowsInterfaceNames(w, d))
 }
 
@@ -646,4 +642,61 @@ func TestInterfaceTypeWiredAndWifiFailure(t *testing.T) {
 	f, err := wlanStatus(c, testIface)
 	require.NoError(t, err)
 	assert.Equal(t, "wifi", f.InterfaceType)
+}
+
+// 12013 (and 15514 on builds that log them) carry the EAP method's own
+// result: EAPReasonCode goes to failure_eap_code and a non-empty
+// EAPRootCauseString is appended to failure_reason.
+func TestApplyFailureEAPRootCause(t *testing.T) {
+	t.Parallel()
+
+	var s Dot1XStatus
+	applyFailure(&s, loadEvent(t, "wlan-12013"))
+	assert.Equal(t, "0x80420015", s.FailureEAPCode)
+	assert.Equal(t, "Explicit Eap failure received", s.FailureReason, "empty root cause adds nothing")
+	assert.Equal(t, "0x50005", s.FailureCode)
+
+	s = Dot1XStatus{}
+	applyFailure(&s, loadEvent(t, "wired-15514"))
+	assert.Empty(t, s.FailureEAPCode, "field absent")
+
+	s = Dot1XStatus{}
+	applyFailure(&s, winEvent{ID: evWlanAuthFailed, Data: map[string]string{
+		"ReasonText":         "Explicit Eap failure received",
+		"ReasonCode":         "0x50005",
+		"EAPReasonCode":      "0x0",
+		"EAPRootCauseString": "The server certificate is not trusted.\nCheck the trusted root CA.\r\n",
+	}})
+	assert.Empty(t, s.FailureEAPCode, "0x0 means no EAP reason")
+	assert.Equal(t, "Explicit Eap failure received; The server certificate is not trusted.; Check the trusted root CA.", s.FailureReason)
+}
+
+// A wired adapter whose description matches a WLAN adapter's must not be
+// swallowed by the WLAN one: it is renamed "<description> <GUID>" (like
+// duplicate adapters from one source) and that name routes to it.
+func TestWindowsInterfaceNameCollision(t *testing.T) {
+	t.Parallel()
+	w := newFake(t, wlanIfaceStateConnected, connAttrs(wlanIfaceStateConnected, true, "Campus"), sampleProfileXML)
+	clash := testWired(t)
+	clash.description = testIface
+	d := &fakeWiredClient{ifaces: []wiredIface{clash}, events: []winEvent{loadEvent(t, "wired-15505")}}
+	wiredName := testIface + " " + testWiredGUID
+
+	assert.Equal(t, []string{testIface, wiredName}, windowsInterfaceNames(w, d))
+
+	s, err := windowsStatus(w, d, testIface)
+	require.NoError(t, err)
+	assert.Equal(t, "wifi", s.InterfaceType)
+
+	s, err = windowsStatus(w, d, wiredName)
+	require.NoError(t, err)
+	assert.Equal(t, "ethernet", s.InterfaceType)
+	assert.Equal(t, wiredName, s.Interface)
+	assert.Equal(t, testWiredGUID, s.UniqueIdentifier)
+
+	// Without the WLAN adapter there is no clash: the plain name is kept.
+	w = &fakeWlanClient{ifaces: map[string]ifaceInfo{}}
+	assert.Equal(t, []string{testIface}, windowsInterfaceNames(w, d))
+	_, err = windowsStatus(w, d, testIface)
+	require.NoError(t, err)
 }

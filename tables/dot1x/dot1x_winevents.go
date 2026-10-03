@@ -141,10 +141,20 @@ func applyClient(s *Dot1XStatus, e winEvent) {
 
 // applyFailure copies an 802.1X failure event (15514 / 12013) into s and
 // marks it Failed (EAPClientStatus 1) so client_status_name matches macOS.
+// The EAP method's own result, when logged, adds EAPReasonCode
+// (failure_eap_code; "0x0" means none) and EAPRootCauseString (appended to
+// failure_reason).
 func applyFailure(s *Dot1XStatus, e winEvent) {
 	s.ClientStatus = 1
-	s.FailureReason = oneLine(e.Data["ReasonText"])
+	reason := e.Data["ReasonText"]
+	if rc := e.Data["EAPRootCauseString"]; strings.TrimSpace(rc) != "" {
+		reason += "\n" + rc
+	}
+	s.FailureReason = oneLine(reason)
 	s.FailureCode = e.Data["ReasonCode"]
+	if s.FailureEAPCode = e.Data["EAPReasonCode"]; s.FailureEAPCode == "0x0" {
+		s.FailureEAPCode = ""
+	}
 	s.SSID = e.Data["SSID"] // WLAN only; wired events have none
 	mac := e.Data["SwitchMAC"]
 	if mac == "" {
@@ -275,30 +285,36 @@ func wiredStatus(w wiredIface, events []winEvent) (Dot1XStatus, error) {
 	}
 }
 
+// wiredInterfaces returns d's wired adapters, renaming any whose description
+// is also a WLAN adapter name to "<description> <GUID>" (as duplicates within
+// one source are), so both stay listed and individually queryable.
+func wiredInterfaces(wlanInfos map[string]ifaceInfo, d wiredClient) ([]wiredIface, error) {
+	wired, err := d.wiredInterfaces()
+	out := make([]wiredIface, len(wired)) // don't rename in the client's (cached) slice
+	for i, w := range wired {
+		if _, clash := wlanInfos[w.description]; clash {
+			w.description += " " + w.guid
+		}
+		out[i] = w
+	}
+	return out, err
+}
+
 // windowsInterfaceNames lists WLAN adapters then wired adapters with a LAN
-// profile, deduplicated. It returns nil (defaults unknown) only when both
-// enumerations fail; one failing source is treated as having no adapters.
+// profile. It returns nil (defaults unknown) only when both enumerations
+// fail; one failing source is treated as having no adapters.
 func windowsInterfaceNames(w wlanClient, d wiredClient) []string {
-	_, wlanNames, wlanErr := w.interfaces()
-	wired, wiredErr := d.wiredInterfaces()
+	infos, wlanNames, wlanErr := w.interfaces()
+	wired, wiredErr := wiredInterfaces(infos, d)
 	if wlanErr != nil && (wiredErr != nil || len(wired) == 0) {
 		return nil // can't tell "no 802.1X" from "Wi-Fi broken": defaults unknown
 	}
 	names := []string{}
-	seen := map[string]bool{}
-	add := func(n string) {
-		if !seen[n] {
-			seen[n] = true
-			names = append(names, n)
-		}
-	}
 	if wlanErr == nil {
-		for _, n := range wlanNames {
-			add(n)
-		}
+		names = append(names, wlanNames...)
 	}
 	for _, i := range wired {
-		add(i.description)
+		names = append(names, i.description)
 	}
 	return names
 }
@@ -312,7 +328,7 @@ func windowsStatus(w wlanClient, d wiredClient, ifname string) (Dot1XStatus, err
 	if _, ok := infos[ifname]; ok && wlanErr == nil {
 		return wlanStatus(w, ifname)
 	}
-	wired, wiredErr := d.wiredInterfaces()
+	wired, wiredErr := wiredInterfaces(infos, d)
 	for _, i := range wired {
 		if i.description == ifname {
 			return wiredStatus(i, bestEffort(d.wiredEvents()))

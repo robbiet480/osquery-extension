@@ -230,6 +230,8 @@ func applyProfile(s *Dot1XStatus, profile wlanProfileInfo) {
 	if profile.trustedRootCASHA1 != "" {
 		s.TLSTrustedRootCASHA1 = profile.trustedRootCASHA1
 	}
+	s.TLSTrustedServerNames = profile.trustedServerNames
+	s.ServerValidation = profile.serverValidation
 }
 
 // checkActiveConnection returns errNoActiveConnection unless ifState is

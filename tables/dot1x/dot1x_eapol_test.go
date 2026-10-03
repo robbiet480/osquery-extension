@@ -106,6 +106,7 @@ func TestStatusFromEAPOLSystemEAPTLS(t *testing.T) {
 		TLSServerCertificateChain:    "CN=radius.campus.edu,OU=IT,O=CampusGroup|CN=CampusGroup Root CA,O=CampusGroup",
 		TLSServerCertificateSHA1:     sha1String(sha1.Sum(leaf)) + "," + sha1String(sha1.Sum(ca)),
 		TLSServerCertificateSerials:  "7d3a1f9e2b5c,3039",
+		TLSServerCertificateNotAfter: notAfter(t, leaf),
 		TLSTrustClientStatus:         0,
 		TLSNegotiatedCipher:          0xC02B,
 		TLSNegotiatedProtocolVersion: "1.2",
@@ -213,6 +214,7 @@ func TestStatusFromEAPOLMalformedCertChain(t *testing.T) {
 		assert.Empty(t, s.TLSServerCertificateChain, name)
 		assert.Empty(t, s.TLSServerCertificateSHA1, name)
 		assert.Empty(t, s.TLSServerCertificateSerials, name)
+		assert.Empty(t, s.TLSServerCertificateNotAfter, name)
 	}
 
 	// Bad entries are skipped; good ones are kept.
@@ -222,6 +224,31 @@ func TestStatusFromEAPOLMalformedCertChain(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "CN=good.example.com", s.TLSServerCertificateChain)
 	assert.Equal(t, "1", s.TLSServerCertificateSerials)
+	assert.Equal(t, notAfter(t, good), s.TLSServerCertificateNotAfter)
+}
+
+// notAfter is der's NotAfter in the not_after column format.
+func notAfter(t *testing.T, der []byte) string {
+	t.Helper()
+	c, err := x509.ParseCertificate(der)
+	require.NoError(t, err)
+	return c.NotAfter.UTC().Format("2006-01-02T15:04:05Z")
+}
+
+// tls_server_certificate_not_after is the leaf's (first cert's) expiry only.
+func TestStatusFromEAPOLServerCertNotAfter(t *testing.T) {
+	leaf := testCertDER(t, pkix.Name{CommonName: "radius.campus.edu"}, 1)
+	ca := testCertDER(t, pkix.Name{CommonName: "Root CA"}, 2)
+	r := sentinelRaw()
+	r.certChain = packCerts(leaf, ca)
+	s, err := statusFromEAPOL("en0", r)
+	require.NoError(t, err)
+	assert.Equal(t, notAfter(t, leaf), s.TLSServerCertificateNotAfter)
+	assert.Regexp(t, `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$`, s.TLSServerCertificateNotAfter)
+
+	s, err = statusFromEAPOL("en0", sentinelRaw())
+	require.NoError(t, err)
+	assert.Empty(t, s.TLSServerCertificateNotAfter, "no chain")
 }
 
 func TestStatusFromEAPOLNoStatus(t *testing.T) {

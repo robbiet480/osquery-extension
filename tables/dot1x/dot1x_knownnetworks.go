@@ -66,6 +66,9 @@ type eapolProfile struct {
 	name        string // UserDefinedName
 	payloadUUID string // PayloadUUID of the Wi-Fi/Ethernet 802.1X payload that installed it, if any
 	identity    string // outer EAP identity: AuthenticationProperties OuterIdentity, else UserName
+
+	trustedServerNames string // comma-joined AuthenticationProperties TLSTrustedServerNames
+	serverValidation   string // see serverValidation; macOS has no "validation off" setting
 }
 
 // eapolProfileInfo looks up profileID in eap8021x's client configuration
@@ -83,7 +86,10 @@ func eapolProfileInfo(plistData []byte, profileID string) eapolProfile {
 		return out
 	}
 	profiles, _ := cfg["Profiles"].(map[string]any)
-	profile, _ := profiles[profileID].(map[string]any)
+	profile, ok := profiles[profileID].(map[string]any)
+	if !ok {
+		return out
+	}
 	out.name, _ = profile["UserDefinedName"].(string)
 	wlan, _ := profile["WLAN"].(map[string]any)
 	switch ssid := wlan["SSID"].(type) {
@@ -95,12 +101,22 @@ func eapolProfileInfo(plistData []byte, profileID string) eapolProfile {
 	info, _ := profile["Information"].(map[string]any)
 	mcx, _ := info["com.apple.mcx.configurationprofiles.8021X"].(map[string]any)
 	out.payloadUUID, _ = mcx["PayloadUUID"].(string)
-	// Only the identity keys are read; AuthenticationProperties can also hold
-	// UserPassword and other secrets.
+	// Only the identity and trust keys are read; AuthenticationProperties can
+	// also hold UserPassword and other secrets.
 	auth, _ := profile["AuthenticationProperties"].(map[string]any)
 	if out.identity, _ = auth["OuterIdentity"].(string); out.identity == "" {
 		out.identity, _ = auth["UserName"].(string)
 	}
+	var names []string
+	list, _ := auth["TLSTrustedServerNames"].([]any)
+	for _, v := range list {
+		if n, _ := v.(string); n != "" {
+			names = append(names, n)
+		}
+	}
+	out.trustedServerNames = strings.Join(names, ",")
+	certs, _ := auth["TLSTrustedCertificates"].([]any)
+	out.serverValidation = serverValidation(len(certs) > 0, len(names) > 0, true)
 	return out
 }
 

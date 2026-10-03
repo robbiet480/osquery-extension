@@ -152,6 +152,7 @@ func TestWlanStatusConnectedEAPTLS(t *testing.T) {
 		Mode:                    3, // System
 		TLSSessionWasResumed:    -1,
 		TLSTrustedRootCASHA1:    "23:a6:b1:0a:be:8a:4a:37:72:11:e2:f4:2c:36:67:f1:36:e9:08:bf",
+		ServerValidation:        "ca_only",
 		TLSTrustClientStatus:    -1,
 		TLSNegotiatedCipher:     -1,
 		InnerEAPType:            -1,

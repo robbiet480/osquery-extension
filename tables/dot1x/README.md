@@ -24,14 +24,18 @@ WHERE supplicant_state_name != 'Authenticated';
 | `eap_type` / `eap_type_name` | INTEGER / TEXT | Outer EAP method ([values](#eap_type--inner_eap_type)) | ✓ | ✓ |
 | `inner_eap_type` / `inner_eap_type_name` | INTEGER / TEXT | Inner EAP method for tunneled auth ([values](#eap_type--inner_eap_type)). Empty when the inner method isn't EAP (e.g. TTLS-PAP) | ✓ | ✓ |
 | `client_status` / `client_status_name` | INTEGER / TEXT | EAP client status ([values](#client_status)). Windows reports `OK`, or `Failed` for failure rows | ✓ | ✓ |
-| `failure_reason` / `failure_code` | TEXT | Last 802.1X failure from the Windows event log (`ReasonText` / `ReasonCode`, e.g. `Explicit Eap failure received` / `0x50005`) | — | ✓ |
+| `failure_reason` / `failure_code` | TEXT | Last 802.1X failure from the Windows event log (`ReasonText` / `ReasonCode`, e.g. `Explicit Eap failure received` / `0x50005`). When the event names an EAP root cause (`EAPRootCauseString`), it is appended: `<ReasonText>; <root cause>` | — | ✓ |
+| `failure_eap_code` | TEXT | The EAP method's own error for that failure (`EAPReasonCode`, e.g. `0x80420015`); empty when absent or `0x0` | — | ✓ |
 | `domain_specific_error` | INTEGER | EAP client domain-specific error; an Apple OSStatus, may be negative (e.g. `-9807`) | ✓ | — |
 | `authenticator_mac_address` | TEXT | Authenticator MAC: the AP's BSSID for Wi-Fi, the switch port's MAC for wired | ✓ | ✓ |
 | `mode` / `mode_name` | INTEGER / TEXT | Whose credentials authenticate the session ([values](#mode)) | ✓ | ✓ |
 | `tls_session_was_resumed` | INTEGER | 1/0; empty when unknown (always on Windows) | ✓ | — |
 | `tls_server_certificate_chain` | TEXT | Pipe-separated subject DNs (RFC 4514) of the server certificate chain | ✓ | — |
 | `tls_server_certificate_sha1` / `tls_server_certificate_serials` | TEXT | Comma-separated SHA-1 fingerprints / hex serials of that chain | ✓ | — |
+| `tls_server_certificate_not_after` | TEXT | ISO 8601 (UTC) expiry of the leaf (first) server certificate; empty without a chain | ✓ | — |
 | `tls_trusted_root_ca_sha1` | TEXT | SHA-1 thumbprints of the trusted root CA(s) pinned in the profile | — | ✓ |
+| `tls_trusted_server_names` | TEXT | Comma-separated server names the RADIUS certificate must match. macOS: the profile's `TLSTrustedServerNames`. Windows: the outer method's `ServerNames` | ✓ profile-based | ✓ |
+| `server_validation` | TEXT | How the profile has the client validate the RADIUS server: `pinned`, `ca_only`, `name_only`, `prompt` or `none` (see [Auditing server validation](#auditing-server-validation)); empty for macOS sessions without a profile | ✓ profile-based | ✓ |
 | `tls_trust_client_status` | INTEGER | Trust evaluation status while a trust decision is pending | ✓ | — |
 | `tls_negotiated_protocol_version` | TEXT | `1.2` / `1.3` (EAP-TLS only, see [TLS details on macOS](#tls-details-on-macos)) | ✓ | — |
 | `tls_negotiated_cipher` | INTEGER | TLS cipher suite code (PEAP / TTLS / EAP-FAST only) | ✓ | — |
@@ -123,11 +127,38 @@ SELECT interface, eap_type_name, tls_negotiated_cipher,
 FROM dot1x;
 ```
 
+### Auditing server validation
+
+`server_validation` summarizes, from the profile, how the client decides whether the RADIUS server is genuine:
+
+| Value | Meaning |
+|---|---|
+| `pinned` | Trusted root CA(s) **and** server names configured: only a certificate from that CA with a matching name is accepted |
+| `ca_only` | Trusted CA(s), no server names: **any** certificate that CA issues is accepted |
+| `name_only` | Server names, no trusted CA: any certificate with a matching name that chains to a system-trusted CA is accepted |
+| `prompt` | Nothing pinned: any system-trusted certificate is accepted, and the user may be asked to trust an unknown one |
+| `none` | Windows only: validation switched off (`PerformServerValidation` = `false`); any certificate is accepted |
+
+Anything but `pinned` is risky. With `ca_only`, a rogue access point holding any certificate from the same CA (often a public or broadly used internal CA) passes. With `name_only` and `prompt`, an attacker with a certificate from any public CA, or a user who taps "Trust", hands their credentials (e.g. a PEAP/MSCHAPv2 hash) to a rogue AP. `none` accepts anyone.
+
+Sources: macOS reads the profile's `TLSTrustedCertificates` and `TLSTrustedServerNames` (it has no "no validation" setting; `TLSAllowTrustExceptions` only allows the prompt). Windows reads the outer EAP method's `ServerValidation` (`TrustedRootCA` / TTLS `TrustedRootCAHash`, and `ServerNames`), plus the Windows 7+ switches `PerformServerValidation` (PEAP `PeapExtensions`, EAP-TLS `EapType`, or a `ServerValidation` attribute; `false` gives `none`) and `AcceptServerName` (`false` means `ServerNames` isn't enforced, so it doesn't count). `DisableUserPromptForServerValidation` / TTLS `DisablePrompt` only stops the prompt (validation then fails instead of asking), so it doesn't change the value.
+
+```sql
+-- Profiles that don't pin the RADIUS server.
+SELECT interface, ssid, profile_name, server_validation FROM dot1x WHERE server_validation IN ('ca_only','name_only','prompt','none');
+
+-- RADIUS server certificates expiring within 30 days (macOS).
+SELECT interface, ssid, tls_server_certificate_chain, tls_server_certificate_not_after
+FROM dot1x
+WHERE tls_server_certificate_not_after != ''
+  AND tls_server_certificate_not_after < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '+30 days');
+```
+
 ### Windows
 
 Pure Go (no cgo):
 
-- **Wi-Fi:** the Native Wifi API (`wlanapi.dll`) for live state, BSSID, SSID and profile name, plus the WLAN profile XML for EAP type, inner type, mode and pinned root CA.
+- **Wi-Fi:** the Native Wifi API (`wlanapi.dll`) for live state, BSSID, SSID and profile name, plus the WLAN profile XML for EAP type, inner type, mode and server validation settings.
 - **Wired:** Windows has no documented wired equivalent of wlanapi, so wired uses the Wired AutoConfig LAN profile (`%ProgramData%\Microsoft\dot3svc\Profiles\Interfaces\{GUID}\*.xml`, same schema) for EAP settings, and the `Microsoft-Windows-Wired-AutoConfig/Operational` event log for state, switch-port MAC, timestamp and failure reason (15505 succeeded, 15514 failed, 15503/15504 started, 15506 suspended, 15500 unplugged).
 - **Failures, timestamps, client MAC and identity:** from the `Microsoft-Windows-WLAN-AutoConfig/Operational` (12011 started, 12012 succeeded, 12013 failed) and Wired-AutoConfig event logs, read with `wevtapi.dll`.
 

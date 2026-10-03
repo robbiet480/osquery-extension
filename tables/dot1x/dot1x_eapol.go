@@ -69,7 +69,7 @@ func statusFromEAPOL(ifname string, r eapolRaw) (Dot1XStatus, error) {
 	if len(r.authMAC) == 6 {
 		s.AuthenticatorMACAddress = macAddrString(r.authMAC)
 	}
-	s.TLSServerCertificateChain, s.TLSServerCertificateSHA1, s.TLSServerCertificateSerials = parseTLSCertChain(r.certChain)
+	s.TLSServerCertificateChain, s.TLSServerCertificateSHA1, s.TLSServerCertificateSerials, s.TLSServerCertificateNotAfter = parseTLSCertChain(r.certChain)
 
 	switch r.ret {
 	case 0:
