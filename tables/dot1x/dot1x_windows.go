@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -355,7 +356,16 @@ func enumerateWiredInterfaces() ([]wiredIface, error) {
 		if err != nil || len(files) == 0 {
 			continue
 		}
-		b, err := os.ReadFile(files[0]) // first (sorted) profile per adapter
+		// Wired AutoConfig keeps one profile per adapter (netsh lan add
+		// profile replaces it); if several exist, the newest is the one
+		// applied last.
+		newest, newestMod := files[0], time.Time{}
+		for _, f := range files {
+			if fi, err := os.Stat(f); err == nil && fi.ModTime().After(newestMod) {
+				newest, newestMod = f, fi.ModTime()
+			}
+		}
+		b, err := os.ReadFile(newest)
 		if err != nil {
 			return nil, fmt.Errorf("reading Wired AutoConfig profile: %w", err)
 		}
