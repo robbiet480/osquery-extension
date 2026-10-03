@@ -1,11 +1,13 @@
 package dot1x
 
-// WLAN profile XML parsing for the Windows backend. This logic is pure Go
+// WLAN profile XML parsing for the Windows backend. dot3svc LAN (wired)
+// profiles share the OneX/EAPConfig schema and are parsed here too. This logic is pure Go
 // (no syscalls), so it lives outside the //go:build windows file and is
 // compiled, tested, and coverage-counted on every platform.
 
 import (
 	"encoding/xml"
+	"io"
 	"strconv"
 	"strings"
 )
@@ -17,7 +19,7 @@ type wlanProfileInfo struct {
 	innerEAPType      int    // inner/tunneled EAP method type (see parseWLANProfile)
 	authMode          int    // EAPOLControlMode mapped from <authMode>
 	trustedRootCASHA1 string // comma-separated colon-delimited SHA-1 thumbprints
-	useOneX           bool   // <useOneX>true</useOneX>: the profile is 802.1X
+	useOneX           bool   // <useOneX> (WLAN) or <OneXEnabled> (LAN) is true: the profile is 802.1X
 }
 
 // parseWLANProfile extracts every 802.1X field from a WLAN profile XML in a
@@ -32,6 +34,9 @@ type wlanProfileInfo struct {
 func parseWLANProfile(xmlStr string) wlanProfileInfo {
 	info := wlanProfileInfo{eapType: -1, innerEAPType: -1, authMode: -1}
 	dec := xml.NewDecoder(strings.NewReader(xmlStr))
+	// xmlStr is already a Go (UTF-8) string; ignore any encoding="UTF-16"
+	// declaration a profile file on disk may carry.
+	dec.CharsetReader = func(_ string, r io.Reader) (io.Reader, error) { return r, nil }
 	eapMethodCount := 0
 	eapDepth := 0 // nesting level of <Eap> elements
 	gotAuthMode := false
@@ -73,7 +78,7 @@ func parseWLANProfile(xmlStr string) wlanProfileInfo {
 			}
 		case "OneX":
 			sawOneX = true
-		case "useOneX":
+		case "useOneX", "OneXEnabled": // WLAN, LAN (dot3svc) profile
 			if v, ok := readCharData(dec); ok {
 				info.useOneX = strings.TrimSpace(v) == "true"
 			}

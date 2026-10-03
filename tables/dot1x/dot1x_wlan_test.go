@@ -34,6 +34,8 @@ type fakeWlanClient struct {
 	connErr    error
 	profile    string
 	profileErr error
+	events     []winEvent
+	eventsErr  error
 
 	connCalls    int
 	profileGUID  windowsGUID
@@ -52,6 +54,10 @@ func (f *fakeWlanClient) interfaces() (map[string]ifaceInfo, []string, error) {
 func (f *fakeWlanClient) currentConnection(windowsGUID) ([]byte, error) {
 	f.connCalls++
 	return f.conn, f.connErr
+}
+
+func (f *fakeWlanClient) wlanEvents() ([]winEvent, error) {
+	return f.events, f.eventsErr
 }
 
 func (f *fakeWlanClient) profileXML(guid windowsGUID, name string) (string, error) {

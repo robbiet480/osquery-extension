@@ -7,6 +7,7 @@ package dot1x
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -313,4 +314,32 @@ func TestParseWLANProfileWindowsUITTLS(t *testing.T) {
 	assert.Equal(t, 21, info.eapType)
 	assert.Equal(t, -1, info.innerEAPType)
 	assert.Equal(t, "08:00:f4:2d:42:8e:e5:07:ff:ec:df:fe:4f:9e:31:fd:63:c9:5a:bb", info.trustedRootCASHA1)
+}
+
+// A dot3svc LAN profile (wired 802.1X) uses the same OneX/EAPConfig schema as
+// a WLAN profile, but flags 802.1X with <OneXEnabled> instead of <useOneX>.
+func TestParseLANProfile(t *testing.T) {
+	t.Parallel()
+
+	info := parseWLANProfile(readTestdata(t, "lanprofile-eap-tls-machine.xml"))
+	assert.True(t, info.useOneX)
+	assert.Equal(t, 13, info.eapType)
+	assert.Equal(t, -1, info.innerEAPType)
+	assert.Equal(t, 3, info.authMode)
+	assert.Equal(t, "58:34:c1:13:14:9c:fc:9b:9f:28:70:6f:db:e6:81:a4:78:19:a2:0e", info.trustedRootCASHA1)
+
+	off := parseWLANProfile(`<LANProfile><MSM><security><OneXEnabled>false</OneXEnabled></security></MSM></LANProfile>`)
+	assert.False(t, off.useOneX)
+}
+
+// Profile files on disk may be UTF-16 with a matching encoding declaration,
+// which encoding/xml rejects unless a CharsetReader is set.
+func TestParseWLANProfileEncodingDeclaration(t *testing.T) {
+	t.Parallel()
+
+	xml := strings.Replace(readTestdata(t, "lanprofile-eap-tls-machine.xml"),
+		`<?xml version="1.0"?>`, `<?xml version="1.0" encoding="UTF-16"?>`, 1)
+	info := parseWLANProfile(xml)
+	assert.True(t, info.useOneX)
+	assert.Equal(t, 13, info.eapType)
 }

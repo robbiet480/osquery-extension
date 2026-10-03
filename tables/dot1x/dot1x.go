@@ -17,7 +17,8 @@ import (
 
 // Dot1XStatus holds the 802.1X supplicant state and status for a single
 // interface. On macOS the values come from the EAPOL (EAP over LAN) layer of
-// the EAP8021X framework; on Windows they come from the WLAN/OneX APIs.
+// the EAP8021X framework; on Windows they come from the WLAN/OneX APIs (Wi-Fi)
+// or the Wired AutoConfig event log and LAN profile (Ethernet).
 type Dot1XStatus struct {
 	Interface                    string
 	State                        int    // EAPOLControlState: 0=Idle,1=Starting,2=Running,3=Stopping
@@ -25,6 +26,8 @@ type Dot1XStatus struct {
 	EAPType                      int    // EAP method code (e.g. 13=TLS)
 	EAPTypeName                  string // human-readable EAP method (e.g. "EAP-TLS")
 	ClientStatus                 int    // 0=ok, nonzero=error code
+	FailureReason                string // Windows: event log ReasonText of the last 802.1X failure
+	FailureCode                  string // Windows: event log ReasonCode of the last 802.1X failure (e.g. "0x50005")
 	DomainSpecificError          *int   // Apple OSStatus (may be negative); nil = absent
 	AuthenticatorMACAddress      string // colon-separated
 	Mode                         int    // 0=None,1=User,2=LoginWindow,3=System,4=MachineOrUser (Windows)
@@ -153,6 +156,8 @@ func Dot1XStatusColumns() []table.ColumnDefinition {
 		table.TextColumn("eap_type_name"),
 		table.IntegerColumn("client_status"),
 		table.TextColumn("client_status_name"),
+		table.TextColumn("failure_reason"),
+		table.TextColumn("failure_code"),
 		table.IntegerColumn("domain_specific_error"),
 		table.TextColumn("authenticator_mac_address"),
 		table.IntegerColumn("mode"),
@@ -272,6 +277,8 @@ func rowFromStatus(s Dot1XStatus) map[string]string {
 		"eap_type_name":                   "",
 		"client_status":                   itoa(s.ClientStatus),
 		"client_status_name":              lookupName(clientStatusNames, s.ClientStatus),
+		"failure_reason":                  s.FailureReason,
+		"failure_code":                    s.FailureCode,
 		"domain_specific_error":           optItoa(s.DomainSpecificError),
 		"authenticator_mac_address":       s.AuthenticatorMACAddress,
 		"mode":                            itoa(s.Mode),

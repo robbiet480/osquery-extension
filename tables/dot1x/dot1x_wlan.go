@@ -92,6 +92,9 @@ type wlanClient interface {
 	currentConnection(guid windowsGUID) ([]byte, error)
 	// profileXML returns the named profile's XML.
 	profileXML(guid windowsGUID, name string) (string, error)
+	// wlanEvents returns WLAN-AutoConfig/Operational events (wlanEventIDs),
+	// newest first. Errors are treated as no events.
+	wlanEvents() ([]winEvent, error)
 }
 
 // errNoActiveConnection is returned by GetStatus for an adapter that is not
@@ -142,9 +145,10 @@ func wlanStatus(c wlanClient, ifname string) (Dot1XStatus, error) {
 	}
 	s.State, s.SupplicantState = mapWlanState(info.state)
 
-	// Gate on the enumeration state to avoid querying idle adapters.
-	if err := checkActiveConnection(info.state); err != nil {
-		return s, err
+	// Gate on the enumeration state to avoid querying idle adapters. An idle
+	// adapter still gets a row if its last 802.1X attempt failed.
+	if checkActiveConnection(info.state) != nil {
+		return wlanIdleStatus(c, s)
 	}
 
 	// The interface reports connected/authenticating, so a failed or empty
@@ -166,8 +170,8 @@ func wlanStatus(c wlanClient, ifname string) (Dot1XStatus, error) {
 	// The connection's own state is fresher than the enumeration snapshot
 	// (auth may have completed in between), so it decides from here on.
 	s.State, s.SupplicantState = mapWlanState(conn.IsState)
-	if err := checkActiveConnection(conn.IsState); err != nil {
-		return s, err
+	if checkActiveConnection(conn.IsState) != nil {
+		return wlanIdleStatus(c, s)
 	}
 
 	s.AuthenticatorMACAddress = macAddrString(conn.AssociationAttributes.Dot11Bssid[:])
@@ -197,10 +201,18 @@ func wlanStatus(c wlanClient, ifname string) (Dot1XStatus, error) {
 	if err := applyOneXSecurity(&s, conn.IsState, oneX); err != nil {
 		return s, err
 	}
-
-	if !loadProfile() {
-		return s, nil
+	if conn.IsState == wlanIfaceStateConnected {
+		s.LastStatusTimestamp = wlanAuthTimestamp(c, s.UniqueIdentifier)
 	}
+
+	if loadProfile() {
+		applyProfile(&s, profile)
+	}
+	return s, nil
+}
+
+// applyProfile copies the 802.1X fields of a parsed WLAN/LAN profile into s.
+func applyProfile(s *Dot1XStatus, profile wlanProfileInfo) {
 	if profile.eapType > 0 {
 		s.EAPType = profile.eapType
 	}
@@ -217,7 +229,6 @@ func wlanStatus(c wlanClient, ifname string) (Dot1XStatus, error) {
 	if profile.trustedRootCASHA1 != "" {
 		s.TLSTrustedRootCASHA1 = profile.trustedRootCASHA1
 	}
-	return s, nil
 }
 
 // checkActiveConnection returns errNoActiveConnection unless ifState is

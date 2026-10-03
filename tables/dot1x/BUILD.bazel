@@ -10,6 +10,7 @@ go_library(
         "dot1x_wlan.go",
         "dot1x_wlanprofile.go",
         "dot1x_windows.go",
+        "dot1x_winevents.go",
     ],
     # cgo is only needed on darwin: dot1x_darwin.go (//go:build darwin) calls
     # EAP8021X.framework (via dlopen/dlsym) + CoreFoundation via cgo.
@@ -49,6 +50,7 @@ go_test(
         "dot1x_wlan_test.go",
         "dot1x_wlanprofile_test.go",
         "dot1x_windows_test.go",
+        "dot1x_winevents_test.go",
     ],
     data = glob(["testdata/**"]),
     embed = [":dot1x"],

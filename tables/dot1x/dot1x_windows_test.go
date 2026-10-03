@@ -54,18 +54,6 @@ func TestUniqueIfaceKey(t *testing.T) {
 	assert.Equal(t, "Realtek Wi-Fi", uniqueIfaceKey(infos, "Realtek Wi-Fi", g2))
 }
 
-// --- unavailableBackend ---
-
-func TestUnavailableBackend(t *testing.T) {
-	t.Parallel()
-
-	b := unavailableBackend{}
-	s, err := b.GetStatus("wifi0")
-	require.Error(t, err)
-	assert.ErrorIs(t, err, ErrBackendUnavailable)
-	assert.Equal(t, "wifi0", s.Interface)
-}
-
 // --- Mock-based integration tests using the shared Dot1XBackend interface ---
 
 func TestWindowsMockBackendConnected(t *testing.T) {
@@ -233,10 +221,6 @@ func TestWindowsLiveBackend(t *testing.T) {
 	requireLiveTests(t)
 	backend := newBackend()
 
-	if _, ok := backend.(unavailableBackend); ok {
-		t.Skip("wlanapi.dll not available on this system")
-	}
-
 	ifaces := enumerateWlanInterfaces()
 	if len(ifaces) == 0 {
 		t.Skip("no wireless interfaces found")
@@ -263,10 +247,6 @@ func TestWindowsLiveBackendBogusInterface(t *testing.T) {
 	requireLiveTests(t)
 	backend := newBackend()
 
-	if _, ok := backend.(unavailableBackend); ok {
-		t.Skip("wlanapi.dll not available on this system")
-	}
-
 	_, err := backend.GetStatus("nonexistent_adapter_999")
 	if errors.Is(err, ErrBackendUnavailable) {
 		t.Skipf("WLAN service unavailable: %v", err)
@@ -280,10 +260,6 @@ func TestWindowsLiveBackendBogusInterface(t *testing.T) {
 func TestWindowsLiveProfileXMLExtraction(t *testing.T) {
 	requireLiveTests(t)
 	backend := newBackend()
-
-	if _, ok := backend.(unavailableBackend); ok {
-		t.Skip("wlanapi.dll not available on this system")
-	}
 
 	ifaces := enumerateWlanInterfaces()
 	if len(ifaces) == 0 {

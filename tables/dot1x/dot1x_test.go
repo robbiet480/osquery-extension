@@ -54,7 +54,9 @@ func TestDot1XStatusColumns(t *testing.T) {
 		"interface", "state", "state_name",
 		"supplicant_state", "supplicant_state_name",
 		"eap_type", "eap_type_name",
-		"client_status", "client_status_name", "domain_specific_error",
+		"client_status", "client_status_name",
+		"failure_reason", "failure_code",
+		"domain_specific_error",
 		"authenticator_mac_address",
 		"mode", "mode_name",
 		"tls_session_was_resumed",
@@ -179,9 +181,13 @@ func TestRowFromStatus(t *testing.T) {
 		InnerEAPTypeName:             "MSCHAPv2",
 		LastStatusTimestamp:          "2026-06-05T12:00:00Z",
 		UniqueIdentifier:             "abc-123",
+		FailureReason:                "Explicit Eap failure received",
+		FailureCode:                  "0x50005",
 	}
 
 	row := rowFromStatus(s)
+	assert.Equal(t, "Explicit Eap failure received", row["failure_reason"])
+	assert.Equal(t, "0x50005", row["failure_code"])
 	assert.Equal(t, "en0", row["interface"])
 	assert.Equal(t, "2", row["state"])
 	assert.Equal(t, "Running", row["state_name"])

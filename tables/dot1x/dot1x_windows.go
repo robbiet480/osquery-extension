@@ -4,6 +4,10 @@ package dot1x
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -11,8 +15,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// This file holds only the wlanapi.dll syscall plumbing. The status logic it
-// feeds lives in dot1x_wlan.go (wlanStatus), which is tested on every platform.
+// This file holds only the syscall plumbing: wlanapi.dll (Wi-Fi), wevtapi.dll
+// (event log), GetAdaptersAddresses and the dot3svc profile store (wired). The
+// status logic it feeds lives in dot1x_wlan.go and dot1x_winevents.go, which
+// are tested on every platform.
 
 const (
 	wlanClientVersion = 2
@@ -74,36 +80,37 @@ func initWlan() {
 	wlanAvail = true
 }
 
-// windowsBackend implements wlanClient for one table generation. On first use
-// it opens a WLAN client handle and snapshots all interfaces (both the
-// description->info map and the ordered names) so the generation enumerates
-// only once — shared between the default interface list and every GetStatus.
-// Close releases the handle.
+// windowsBackend implements wlanClient and wiredClient for one table
+// generation. On first use it opens a WLAN client handle and snapshots all
+// interfaces (both the description->info map and the ordered names) so the
+// generation enumerates only once — shared between the default interface list
+// and every GetStatus. Wired adapters and each event log channel are likewise
+// fetched at most once per generation. Close releases the handle.
 type windowsBackend struct {
 	handle  uintptr
 	once    sync.Once
 	ifaces  map[string]ifaceInfo
 	names   []string
 	enumErr error
+
+	wiredOnce   sync.Once
+	wired       []wiredIface
+	wiredErr    error
+	wiredEvOnce sync.Once
+	wiredEv     []winEvent
+	wiredEvErr  error
+	wlanEvOnce  sync.Once
+	wlanEv      []winEvent
+	wlanEvErr   error
 }
 
+// newBackend always returns a windowsBackend: wired 802.1X needs no optional
+// DLL, so a missing wlanapi.dll (e.g. Server without the Wireless LAN
+// Service) only makes the WLAN half report an enumeration error.
+// ErrBackendUnavailable is returned by GetStatus only when both halves fail.
 func newBackend() Dot1XBackend {
 	wlanOnce.Do(initWlan)
-	if !wlanAvail {
-		return unavailableBackend{}
-	}
 	return &windowsBackend{}
-}
-
-type unavailableBackend struct{}
-
-func (unavailableBackend) GetStatus(ifname string) (Dot1XStatus, error) {
-	if wlanInitErr != nil {
-		return Dot1XStatus{Interface: ifname},
-			fmt.Errorf("%w: Windows WLAN backend unavailable: %w", ErrBackendUnavailable, wlanInitErr)
-	}
-	return Dot1XStatus{Interface: ifname},
-		fmt.Errorf("%w: Windows WLAN backend unavailable", ErrBackendUnavailable)
 }
 
 func openWlanHandle() (uintptr, error) {
@@ -169,14 +176,16 @@ func uniqueIfaceKey(seen map[string]ifaceInfo, desc string, guid windowsGUID) st
 	return desc + " " + guid.String()
 }
 
-// enumerateWlanInterfaces returns the descriptions of all wireless interfaces.
+// enumerateWlanInterfaces returns the descriptions of all wireless
+// interfaces, or nil when WLAN is unavailable or enumeration failed.
 func enumerateWlanInterfaces() []string {
-	b, ok := newBackend().(*windowsBackend)
-	if !ok {
+	b := &windowsBackend{}
+	defer b.Close() //nolint:errcheck
+	_, names, err := b.interfaces()
+	if err != nil {
 		return nil
 	}
-	defer b.Close() //nolint:errcheck
-	return b.interfaceNames()
+	return names
 }
 
 func defaultInterfaces() []string {
@@ -194,6 +203,11 @@ func defaultInterfaces() []string {
 // generation retries with a fresh backend.
 func (b *windowsBackend) interfaces() (map[string]ifaceInfo, []string, error) {
 	b.once.Do(func() {
+		wlanOnce.Do(initWlan)
+		if !wlanAvail {
+			b.enumErr = fmt.Errorf("windows WLAN backend unavailable: %w", wlanInitErr)
+			return
+		}
 		h, err := openWlanHandle()
 		if err != nil {
 			b.enumErr = fmt.Errorf("opening WLAN client handle: %w", err)
@@ -207,19 +221,36 @@ func (b *windowsBackend) interfaces() (map[string]ifaceInfo, []string, error) {
 
 // interfaceNames satisfies the shared interfaceLister optional interface so the
 // default interface list for an unconstrained query is sourced from the same
-// snapshot GetStatus uses, avoiding a second WlanEnumInterfaces call. Returns
-// nil when WLAN is unavailable / enumeration failed (caller's generic
-// fallback), or a possibly-empty slice of adapter names otherwise.
+// snapshots GetStatus uses. Returns nil when both WLAN and wired enumeration
+// failed (caller's generic fallback), or a possibly-empty slice of WLAN and
+// wired adapter names otherwise.
 func (b *windowsBackend) interfaceNames() []string {
-	_, names, err := b.interfaces()
-	if err != nil {
-		return nil
-	}
-	return names
+	return windowsInterfaceNames(b, b)
 }
 
 func (b *windowsBackend) GetStatus(ifname string) (Dot1XStatus, error) {
-	return wlanStatus(b, ifname)
+	return windowsStatus(b, b, ifname)
+}
+
+func (b *windowsBackend) wlanEvents() ([]winEvent, error) {
+	b.wlanEvOnce.Do(func() {
+		b.wlanEv, b.wlanEvErr = queryEvents("Microsoft-Windows-WLAN-AutoConfig/Operational", wlanEventIDs)
+	})
+	return b.wlanEv, b.wlanEvErr
+}
+
+func (b *windowsBackend) wiredEvents() ([]winEvent, error) {
+	b.wiredEvOnce.Do(func() {
+		b.wiredEv, b.wiredEvErr = queryEvents("Microsoft-Windows-Wired-AutoConfig/Operational", wiredEventIDs)
+	})
+	return b.wiredEv, b.wiredEvErr
+}
+
+func (b *windowsBackend) wiredInterfaces() ([]wiredIface, error) {
+	b.wiredOnce.Do(func() {
+		b.wired, b.wiredErr = enumerateWiredInterfaces()
+	})
+	return b.wired, b.wiredErr
 }
 
 // Close releases the WLAN client handle, if one was opened.
@@ -292,4 +323,179 @@ func utf16PtrToString(p *uint16) string {
 		return ""
 	}
 	return windows.UTF16PtrToString(p)
+}
+
+// --- wired: dot3svc LAN profiles + GetAdaptersAddresses ---
+
+// enumerateWiredInterfaces returns the adapters that have a dot3svc LAN
+// profile (%ProgramData%\Microsoft\dot3svc\Profiles\Interfaces\{GUID}\*.xml),
+// named by adapter Description like the WLAN adapters.
+func enumerateWiredInterfaces() ([]wiredIface, error) {
+	programData, err := windows.KnownFolderPath(windows.FOLDERID_ProgramData, 0)
+	if err != nil {
+		return nil, fmt.Errorf("locating ProgramData: %w", err)
+	}
+	files, err := filepath.Glob(filepath.Join(programData, "Microsoft", "dot3svc", "Profiles", "Interfaces", "*", "*.xml"))
+	if err != nil {
+		return nil, err
+	}
+	profiles := make(map[string]string) // upper-case "{GUID}" -> profile XML
+	for _, f := range files {
+		guid := strings.ToUpper(filepath.Base(filepath.Dir(f)))
+		if _, ok := profiles[guid]; ok {
+			continue // first (sorted) profile per adapter wins
+		}
+		if b, err := os.ReadFile(f); err == nil {
+			profiles[guid] = decodeProfileBytes(b)
+		}
+	}
+	if len(profiles) == 0 {
+		return []wiredIface{}, nil // no wired 802.1X configured; skip adapter enumeration
+	}
+
+	head, err := adapterAddresses()
+	if err != nil {
+		return nil, err
+	}
+	out := []wiredIface{}
+	seen := make(map[string]bool)
+	for a := head; a != nil; a = a.Next {
+		guid := strings.ToUpper(windows.BytePtrToString(a.AdapterName))
+		profile, ok := profiles[guid]
+		if !ok {
+			continue
+		}
+		desc := windows.UTF16PtrToString(a.Description)
+		if seen[desc] {
+			desc += " " + guid // identical adapters stay individually queryable
+		}
+		seen[desc] = true
+		out = append(out, wiredIface{
+			guid:        guid,
+			description: desc,
+			linkUp:      a.OperStatus == windows.IfOperStatusUp,
+			profileXML:  profile,
+		})
+	}
+	return out, nil
+}
+
+// adapterAddresses calls GetAdaptersAddresses, growing the buffer as needed.
+// The returned list points into a Go-allocated buffer kept alive by it.
+func adapterAddresses() (*windows.IpAdapterAddresses, error) {
+	const flags = windows.GAA_FLAG_SKIP_UNICAST | windows.GAA_FLAG_SKIP_ANYCAST |
+		windows.GAA_FLAG_SKIP_MULTICAST | windows.GAA_FLAG_SKIP_DNS_SERVER
+	size := uint32(15000)
+	for i := 0; i < 3; i++ {
+		buf := make([]byte, size)
+		p := (*windows.IpAdapterAddresses)(unsafe.Pointer(&buf[0]))
+		err := windows.GetAdaptersAddresses(windows.AF_UNSPEC, flags, 0, p, &size)
+		if err == nil {
+			if size == 0 {
+				return nil, nil
+			}
+			return p, nil
+		}
+		if err != windows.ERROR_BUFFER_OVERFLOW {
+			return nil, fmt.Errorf("GetAdaptersAddresses failed: %w", err)
+		}
+	}
+	return nil, fmt.Errorf("GetAdaptersAddresses: buffer kept growing")
+}
+
+// --- event log: wevtapi.dll ---
+
+const (
+	evtQueryChannelPath      = 0x1
+	evtQueryReverseDirection = 0x200
+	evtRenderEventXML        = 1
+
+	maxEvents = 256 // per channel per generation
+	evtBatch  = 32
+)
+
+var (
+	modWevtapi    = windows.NewLazySystemDLL("wevtapi.dll")
+	procEvtQuery  = modWevtapi.NewProc("EvtQuery")
+	procEvtNext   = modWevtapi.NewProc("EvtNext")
+	procEvtRender = modWevtapi.NewProc("EvtRender")
+	procEvtClose  = modWevtapi.NewProc("EvtClose")
+)
+
+func evtClose(h uintptr) {
+	procEvtClose.Call(h) //nolint:errcheck
+}
+
+// queryEvents returns up to maxEvents events with the given IDs from channel,
+// newest first. Events that fail to render or parse are skipped.
+func queryEvents(channel string, ids []int) ([]winEvent, error) {
+	for _, p := range []*windows.LazyProc{procEvtQuery, procEvtNext, procEvtRender, procEvtClose} {
+		if err := p.Find(); err != nil {
+			return nil, fmt.Errorf("resolving wevtapi.dll proc %s: %w", p.Name, err)
+		}
+	}
+	terms := make([]string, len(ids))
+	for i, id := range ids {
+		terms[i] = "EventID=" + strconv.Itoa(id)
+	}
+	pathPtr, err := windows.UTF16PtrFromString(channel)
+	if err != nil {
+		return nil, err
+	}
+	queryPtr, err := windows.UTF16PtrFromString("*[System[(" + strings.Join(terms, " or ") + ")]]")
+	if err != nil {
+		return nil, err
+	}
+	h, _, callErr := procEvtQuery.Call(0, uintptr(unsafe.Pointer(pathPtr)), uintptr(unsafe.Pointer(queryPtr)),
+		evtQueryChannelPath|evtQueryReverseDirection)
+	if h == 0 {
+		return nil, fmt.Errorf("EvtQuery(%s) failed: %w", channel, callErr)
+	}
+	defer evtClose(h)
+
+	var events []winEvent
+	var buf []uint16
+	handles := make([]uintptr, evtBatch)
+	for len(events) < maxEvents {
+		var returned uint32
+		ok, _, callErr := procEvtNext.Call(h, uintptr(len(handles)), uintptr(unsafe.Pointer(&handles[0])),
+			windows.INFINITE, 0, uintptr(unsafe.Pointer(&returned)))
+		if ok == 0 {
+			if callErr == windows.ERROR_NO_MORE_ITEMS {
+				break
+			}
+			return events, fmt.Errorf("EvtNext(%s) failed: %w", channel, callErr)
+		}
+		for _, eh := range handles[:returned] {
+			if len(events) < maxEvents {
+				if x, err := renderEventXML(eh, &buf); err == nil {
+					if e, err := parseWinEventXML(x); err == nil {
+						events = append(events, e)
+					}
+				}
+			}
+			evtClose(eh)
+		}
+	}
+	return events, nil
+}
+
+// renderEventXML renders one event handle as XML, reusing/growing *buf.
+func renderEventXML(h uintptr, buf *[]uint16) (string, error) {
+	for {
+		var used, count uint32
+		var p uintptr
+		if len(*buf) > 0 {
+			p = uintptr(unsafe.Pointer(&(*buf)[0]))
+		}
+		ok, _, callErr := procEvtRender.Call(0, h, evtRenderEventXML, uintptr(len(*buf)*2), p,
+			uintptr(unsafe.Pointer(&used)), uintptr(unsafe.Pointer(&count)))
+		if ok != 0 {
+			return windows.UTF16ToString((*buf)[:used/2]), nil
+		}
+		if callErr != windows.ERROR_INSUFFICIENT_BUFFER || int(used) <= len(*buf)*2 {
+			return "", fmt.Errorf("EvtRender failed: %w", callErr)
+		}
+		*buf = make([]uint16, (used+1)/2)
+	}
 }
