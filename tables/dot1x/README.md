@@ -40,86 +40,6 @@ WHERE supplicant_state_name != 'Authenticated';
 
 Query a single interface with `WHERE interface = 'en0'` (macOS) or `WHERE interface = '<adapter description>'` (Windows). Otherwise every 802.1X-capable interface is checked: all `en*` interfaces on macOS, and Wi-Fi adapters plus wired adapters with a Wired AutoConfig profile on Windows.
 
-## Value reference
-
-### `state`
-
-- `0` Idle
-- `1` Starting
-- `2` Running
-- `3` Stopping
-
-### `supplicant_state`
-
-- `0` Disconnected
-- `1` Connecting
-- `2` Acquired: an authenticator responded; waiting for identity or credentials
-- `3` Authenticating
-- `4` Authenticated
-- `5` Held: the last attempt failed; waiting before retrying
-- `6` Logoff
-- `7` Inactive
-- `8` No Authenticator: nothing answered 802.1X on this link (e.g. the RADIUS server is unreachable, or the switch port isn't enforcing 802.1X)
-
-### `eap_type` / `inner_eap_type`
-
-- `1` Identity
-- `2` Notification
-- `3` Nak
-- `4` MD5-Challenge
-- `5` One-Time Password
-- `6` Generic Token Card
-- `13` EAP-TLS
-- `17` Cisco LEAP
-- `18` EAP-SIM
-- `19` SRP-SHA1
-- `21` EAP-TTLS
-- `23` EAP-AKA
-- `25` PEAP
-- `26` MSCHAPv2
-- `33` Extensions
-- `43` EAP-FAST
-- `50` EAP-AKA-Prime
-
-On macOS, `eap_type_name` / `inner_eap_type_name` are taken from macOS itself when it supplies them (e.g. `EAP-PEAP`, `EAP-TTLS`), so they can differ slightly from this list. Unlisted numbers show as `Unknown(<n>)`.
-
-### `client_status`
-
-These are eap8021x's `EAPClientStatus` values ([EAPClientTypes.h](https://github.com/apple-oss-distributions/eap8021x/blob/eap8021x-368.120.2.0.1/EAP8021X.fproj/EAPClientTypes.h)):
-
-- `0` OK
-- `1` Failed
-- `2` AllocationFailed
-- `3` UserInputRequired: waiting for credentials or a certificate-trust decision
-- `4` ConfigurationInvalid
-- `5` ProtocolNotSupported
-- `6` ServerCertificateNotTrusted
-- `7` InnerProtocolNotSupported
-- `8` InternalError
-- `9` UserCancelledAuthentication
-- `10` UnknownRootCertificate
-- `11` NoRootCertificate
-- `12` CertificateExpired
-- `13` CertificateNotYetValid
-- `14` CertificateRequiresConfirmation
-- `15` UserInputNotPossible
-- `16` ResourceUnavailable
-- `17` ProtocolError
-- `18` AuthenticationStalled
-- `19` IdentityDecryptionError
-- `20` OtherInputRequired
-- `1000` ErrnoError: see `domain_specific_error`
-- `1001` SecurityError: see `domain_specific_error` (an OSStatus)
-- `1002` PluginSpecificError
-
-### `mode`
-
-- `0` None
-- `1` User: the logged-in user's credentials
-- `2` LoginWindow: credentials entered at the login window
-- `3` System: machine credentials (e.g. a device certificate), no user needed
-- `4` MachineOrUser (Windows only): user credentials while a user is logged on, machine credentials otherwise. This is also Windows' default when a profile omits `authMode`.
-
 ## When is there a row?
 
 An interface returns a row only when it has an 802.1X session. Interfaces on open/PSK networks, and disconnected adapters, return no row. There's one exception: on Windows, a **disconnected Wi-Fi adapter whose last 802.1X attempt failed** returns a `Held` row with `failure_reason`/`failure_code`, so failed attempts are visible.
@@ -212,3 +132,83 @@ bazel test //tables/dot1x:dot1x_test
 ```
 
 Most tests are platform-neutral and run on Linux CI. They exercise both backends' `GetStatus` logic against fakes and real fixtures exported from macOS and Windows (WLAN/LAN profiles, event-log XML, plist structures). Set `DOT1X_LIVE_TESTS=1` to also run the live smoke tests against the host's real 802.1X stack.
+
+## Value reference
+
+### `state`
+
+- `0` Idle
+- `1` Starting
+- `2` Running
+- `3` Stopping
+
+### `supplicant_state`
+
+- `0` Disconnected
+- `1` Connecting
+- `2` Acquired: an authenticator responded; waiting for identity or credentials
+- `3` Authenticating
+- `4` Authenticated
+- `5` Held: the last attempt failed; waiting before retrying
+- `6` Logoff
+- `7` Inactive
+- `8` No Authenticator: nothing answered 802.1X on this link (e.g. the RADIUS server is unreachable, or the switch port isn't enforcing 802.1X)
+
+### `eap_type` / `inner_eap_type`
+
+- `1` Identity
+- `2` Notification
+- `3` Nak
+- `4` MD5-Challenge
+- `5` One-Time Password
+- `6` Generic Token Card
+- `13` EAP-TLS
+- `17` Cisco LEAP
+- `18` EAP-SIM
+- `19` SRP-SHA1
+- `21` EAP-TTLS
+- `23` EAP-AKA
+- `25` PEAP
+- `26` MSCHAPv2
+- `33` Extensions
+- `43` EAP-FAST
+- `50` EAP-AKA-Prime
+
+On macOS, `eap_type_name` / `inner_eap_type_name` are taken from macOS itself when it supplies them (e.g. `EAP-PEAP`, `EAP-TTLS`), so they can differ slightly from this list. Unlisted numbers show as `Unknown(<n>)`.
+
+### `client_status`
+
+These are eap8021x's `EAPClientStatus` values ([EAPClientTypes.h](https://github.com/apple-oss-distributions/eap8021x/blob/eap8021x-368.120.2.0.1/EAP8021X.fproj/EAPClientTypes.h)):
+
+- `0` OK
+- `1` Failed
+- `2` AllocationFailed
+- `3` UserInputRequired: waiting for credentials or a certificate-trust decision
+- `4` ConfigurationInvalid
+- `5` ProtocolNotSupported
+- `6` ServerCertificateNotTrusted
+- `7` InnerProtocolNotSupported
+- `8` InternalError
+- `9` UserCancelledAuthentication
+- `10` UnknownRootCertificate
+- `11` NoRootCertificate
+- `12` CertificateExpired
+- `13` CertificateNotYetValid
+- `14` CertificateRequiresConfirmation
+- `15` UserInputNotPossible
+- `16` ResourceUnavailable
+- `17` ProtocolError
+- `18` AuthenticationStalled
+- `19` IdentityDecryptionError
+- `20` OtherInputRequired
+- `1000` ErrnoError: see `domain_specific_error`
+- `1001` SecurityError: see `domain_specific_error` (an OSStatus)
+- `1002` PluginSpecificError
+
+### `mode`
+
+- `0` None
+- `1` User: the logged-in user's credentials
+- `2` LoginWindow: credentials entered at the login window
+- `3` System: machine credentials (e.g. a device certificate), no user needed
+- `4` MachineOrUser (Windows only): user credentials while a user is logged on, machine credentials otherwise. This is also Windows' default when a profile omits `authMode`.
