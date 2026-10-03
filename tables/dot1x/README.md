@@ -201,13 +201,13 @@ Pure Go (no cgo):
 
 ## Privileges
 
-| | macOS | Windows |
+| Columns | macOS | Windows |
 |---|---|---|
-| Core columns | any user | Wi-Fi: any user |
-| Wired, failure rows, timestamps, `mac_address` / `identity` (Windows) | — | admin / SYSTEM (event logs, `dot3svc` profiles) |
+| Live state, EAP method, authenticator, profile settings (`profile_name`, `server_validation`, trusted CA/names, `mdm_*`) | any user | any user (Wi-Fi live state via wlanapi; wired profile settings) |
+| Event-log columns: `authenticated_since`, `last_status_timestamp`, `mac_address`, `identity`, failure rows, **wired `supplicant_state`** | — | admin / SYSTEM. As a standard user they're empty and wired rows show an unknown state |
 | `ssid` for networks without a profile | root + Full Disk Access | — |
 
-osqueryd runs as root/SYSTEM, and Fleet and most MDM setups grant osquery Full Disk Access, so in production every column is available.
+Verified on Windows 11 as a standard (non-admin) user: Wi-Fi rows are complete apart from the event-log columns, and wired rows appear with their profile settings but no state. osqueryd runs as root/SYSTEM, and Fleet and most MDM setups grant osquery Full Disk Access, so in production every column is available.
 
 ## Limitations
 
